@@ -13,12 +13,11 @@ mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('✅ 019 Database Connected Successfully'))
     .catch((err) => console.error('❌ Database Connection Error:', err));
 
-const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: "http://localhost:3002",
-        methods: ["GET", "POST"]
-    }
+  cors: {
+    origin: "https://your-019-app.vercel.app", // Your ACTUAL Vercel URL
+    methods: ["GET", "POST"]
+  }
 });
 
 const Message = require('./models/Message'); // Import the model at the top
@@ -59,7 +58,7 @@ io.on('connection', async (socket) => {
 });
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
     console.log(`🚀 019 Server spinning on port ${PORT}`);
 });
