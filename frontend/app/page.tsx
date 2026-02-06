@@ -162,24 +162,27 @@ export default function Home() {
               {chat.map((msg: any, index) => (
                 <div key={msg._id || index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
                   <span className="text-[10px] text-zinc-500 mb-1 uppercase tracking-tighter">{msg.sender}</span>
-                  
+
                   {/* 1. Added 'group' and 'relative' here */}
                   <div className="relative group max-w-[80%] flex items-center gap-2">
-                    
+
                     {/* 2. The Delete Button (shown on hover) */}
                     {(msg.sender === username || localStorage.getItem("019_role") === "admin") && (
                       <button 
                         onClick={() => {
-                          if(confirm("PERMANENTLY_DELETE_TRANSMISSION?")) {
-                            socket.emit("delete_message", { messageId: msg._id, username });
+                          // Check if _id exists, if not try id
+                          const idToDelete = msg._id || msg.id; 
+                          if (idToDelete) {
+                            socket.emit("delete_message", { messageId: idToDelete, username: username });
+                          } else {
+                            console.error("CRITICAL: Message ID is missing!");
                           }
                         }}
-                        className="opacity-0 group-hover:opacity-100 order-last text-[9px] text-red-500 border border-red-900/50 px-1 rounded hover:bg-red-900/20 transition-all cursor-pointer h-fit"
-                      >
+                        className="opacity-0 group-hover:opacity-100 text-red-500 text-[10px] border border-red-900 px-1 rounded hover:bg-red-900/20 transition-all cursor-pointer">
                         [DEL]
                       </button>
                     )}
-            
+
                     {/* The Message Bubble */}
                     <div className={`p-3 rounded-lg break-words ${
                       msg.sender === username 

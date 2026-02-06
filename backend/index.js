@@ -82,43 +82,55 @@ io.on('connection', (socket) => {
     });
 
     socket.on('send_message', async (data) => {
-        try {
-            const newMessage = new Message({ sender: data.user, text: data.text });
-            await newMessage.save();
-            io.emit('receive_message', {
-                sender: newMessage.sender,
-                text: newMessage.text,
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            });
-        } catch (err) {
-            console.error("TX_ERR:", err);
-        }
-    });
+    try {
+        const newMessage = new Message({
+            sender: data.user,
+            text: data.text
+        });
+        const savedMessage = await newMessage.save();
+
+        // IMPORTANT: We emit the 'savedMessage' because it now has the _id from MongoDB
+        io.emit('receive_message', savedMessage); 
+    } catch (err) {
+        console.error("SEND_ERROR:", err);
+    }
+});
 
     // --- DELETE A SINGLE MESSAGE ---
     socket.on('delete_message', async (data) => {
-        try {
-            const { messageId, username } = data;
-            const user = await User.findOne({ username });
-            const message = await Message.findById(messageId);
+    try {
+        const { messageId, username } = data;
+        
+        // Find the message and the user in the database
+        const message = await Message.findById(messageId);
+        const user = await User.findOne({ username });
 
-            if (!message || !user) return;
-
-            // Permission: Is it their own message OR are they an admin?
-            if (message.sender === username || user.role === 'admin') {
-                await Message.findByIdAndDelete(messageId);
-                io.emit('message_deleted', messageId); // Tell everyone to remove it
-            }
-        } catch (err) {
-            console.error("DELETE_ERROR:", err);
+        if (!message) {
+            console.log("DELETE_FAILED: Message not found in DB");
+            return;
         }
-    });
+
+        // Logic check: Are you the sender OR an admin?
+        const isOwner = message.sender === username;
+        const isAdmin = user && user.role === 'iloveshirin';
+
+        if (isOwner || isAdmin) {
+            await Message.findByIdAndDelete(messageId);
+            io.emit('message_deleted', messageId); // Broadcast to everyone
+            console.log(`SUCCESS: Message ${messageId} deleted by ${username}`);
+        } else {
+            console.log(`DENIED: ${username} is not an owner or admin`);
+        }
+    } catch (err) {
+        console.error("DELETE_ERROR:", err);
+    }
+});
 
     // --- PURGE ENTIRE CHAT (Admin Only) ---
     socket.on('clear_all_messages', async (username) => {
         try {
             const user = await User.findOne({ username });
-            if (user && user.role === 'admin') {
+            if (user && user.role === 'iloveshirin') {
                 await Message.deleteMany({});
                 io.emit('chat_cleared'); // Tell everyone to wipe their screen
             }
