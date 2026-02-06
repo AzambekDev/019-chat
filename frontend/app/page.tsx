@@ -1,127 +1,137 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+
+import { useState, useEffect, useRef } from "react";
 import { socket } from "@/lib/socket";
 
 export default function Home() {
-  const [isConnected, setIsConnected] = useState(false);
-  const [message, setMessage] = useState("");
-  const [chat, setChat] = useState<any[]>([]); // Changed to any[] to handle objects
+  // --- STATES ---
   const [username, setUsername] = useState("");
-  const [hasUsername, setHasUsername] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [message, setMessage] = useState("");
+  const [chat, setChat] = useState<{ sender: string; text: string; time?: string }[]>([]);
+  const [mounted, setMounted] = useState(false); // Fixes Next.js "window" errors
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll logic
+  // --- 1. PERSISTENCE LOGIC (Runs on startup) ---
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    setMounted(true); // Tell Next.js we are now in the browser
+    
+    const savedUser = localStorage.getItem("019_operator_name");
+    if (savedUser) {
+      setUsername(savedUser);
+      setIsLoggedIn(true);
+      socket.connect();
     }
-  }, [chat]);
 
-  useEffect(() => {
-    socket.connect();
-
-    socket.on("connect", () => setIsConnected(true));
-    socket.on("disconnect", () => setIsConnected(false));
-
-    socket.on("load_messages", (messages: any[]) => {
-      setChat(messages);
-    });
-
-    socket.on("receive_message", (data: any) => {
+    // Listen for incoming messages
+    socket.on("load_messages", (messages) => setChat(messages));
+    socket.on("receive_message", (data) => {
       setChat((prev) => [...prev, data]);
     });
 
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
       socket.off("load_messages");
       socket.off("receive_message");
     };
   }, []);
 
-  const sendData = () => {
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chat]);
+
+  // --- 2. LOGIN & LOGOUT FUNCTIONS ---
+  const handleLogin = () => {
+    if (username.trim()) {
+      localStorage.setItem("019_operator_name", username); // Save to browser
+      setIsLoggedIn(true);
+      socket.connect();
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("019_operator_name"); // Wipe browser memory
+    window.location.reload(); // Hard reset
+  };
+
+  const sendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
     if (message.trim()) {
-      socket.emit("send_message", {
-        user: username || "Anonymous",
-        text: message,
-      });
+      socket.emit("send_message", { user: username, text: message });
       setMessage("");
     }
   };
 
-  return (
-    <main className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-4 font-mono">
-      <h1 className="text-4xl font-bold mb-4 tracking-tighter text-white">019_PROTOCOL</h1>
+  // Prevent hydration error (waits for browser to be ready)
+  if (!mounted) return null;
 
-      {!hasUsername ? (
-        /* --- LOGIN OVERLAY --- */
-        <div className="w-full max-w-md p-6 border border-zinc-800 bg-zinc-900/50 rounded-lg shadow-xl">
-          <div className="mb-6">
-            <p className="text-[10px] text-green-500 uppercase tracking-[0.3em] mb-1">Identity_Handshake</p>
-            <p className="text-zinc-500 text-[10px]">AUTH_REQUIRED: ENTER_OPERATOR_HANDLE</p>
-          </div>
-          
-          <div className="flex flex-col gap-3">
-            <input
-              type="text"
-              autoFocus
-              placeholder="OPERATOR_ID"
-              onChange={(e) => setUsername(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && username && setHasUsername(true)}
-              className="bg-black border border-zinc-700 p-3 text-white outline-none focus:border-green-500 transition-all placeholder:text-zinc-800"
-            />
-            <button
-              onClick={() => username && setHasUsername(true)}
-              className="bg-white text-black font-bold py-3 hover:bg-zinc-200 transition-colors uppercase text-xs tracking-widest"
-            >
-              Initialize_Link
-            </button>
-          </div>
+  // --- 3. UI RENDERING ---
+  return (
+    <main className="min-h-screen bg-black text-green-500 font-mono p-4 flex flex-col items-center justify-center">
+      {!isLoggedIn ? (
+        /* --- LOGIN SCREEN --- */
+        <div className="border border-green-900 p-8 bg-zinc-950 rounded-lg shadow-2xl">
+          <h1 className="text-2xl mb-6 tracking-tighter uppercase font-bold">Protocol_019 // Auth</h1>
+          <input
+            type="text"
+            placeholder="ENTER_OPERATOR_HANDLE"
+            className="bg-black border border-green-800 p-3 w-full mb-4 text-green-500 focus:outline-none focus:border-green-400"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          <button
+            onClick={handleLogin}
+            className="w-full bg-green-900 hover:bg-green-700 text-black font-bold p-3 transition-all"
+          >
+            INITIALIZE_LINK
+          </button>
         </div>
       ) : (
-        /* --- ACTIVE CHAT INTERFACE --- */
-        <>
-          <div className="w-full max-w-md flex justify-between items-center mb-2 px-1">
-            <div className={`text-[10px] ${isConnected ? "text-green-500" : "text-red-500"}`}>
-              {isConnected ? "● SYSTEM_ONLINE" : "○ SYSTEM_OFFLINE"}
+        /* --- CHAT INTERFACE --- */
+        <div className="w-full max-w-2xl h-[80vh] border border-zinc-800 bg-zinc-950 flex flex-col rounded-lg overflow-hidden">
+          {/* Header */}
+          <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-black/50">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-xs uppercase tracking-widest">System_Online // {username}</span>
             </div>
-            <div className="text-[10px] text-zinc-500 uppercase">Operator: {username}</div>
-          </div>
-
-          <div 
-            ref={scrollRef}
-            className="w-full max-w-md border border-zinc-800 rounded-lg p-4 h-80 overflow-y-auto mb-4 bg-zinc-900/50 scroll-smooth shadow-inner"
-          >
-            {chat.length === 0 && (
-              <p className="text-zinc-700 text-xs italic text-center mt-4">Initializing logs...</p>
-            )}
-            {chat.map((msg: any, i) => (
-              <div key={i} className="mb-2 font-mono text-sm border-b border-zinc-800/30 pb-1 flex flex-col">
-                <span className="text-green-500 text-[10px] font-bold uppercase tracking-tighter">
-                  [{msg.sender || msg.user || "Unknown"}]
-                </span>
-                <span className="text-zinc-300">{msg.text}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex gap-2 w-full max-w-md">
-            <input
-              type="text"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendData()}
-              className="flex-1 bg-zinc-800 border border-zinc-700 p-2 rounded outline-none focus:border-green-500 text-white font-mono text-sm"
-              placeholder="Enter command..."
-            />
             <button 
-              onClick={sendData} 
-              className="bg-white text-black px-4 py-2 rounded font-bold hover:bg-zinc-200 transition-colors text-xs"
+              onClick={handleLogout}
+              className="text-[10px] bg-red-950/30 border border-red-900 text-red-500 px-3 py-1 rounded hover:bg-red-900 hover:text-white transition-all"
             >
-              SEND
+              [ TERMINATE_SESSION ]
             </button>
           </div>
-        </>
+
+          {/* Messages Area */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
+            {chat.map((msg, index) => (
+              <div key={index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
+                <span className="text-[10px] text-zinc-500 mb-1">{msg.sender}</span>
+                <div className={`p-3 rounded-lg max-w-[80%] ${
+                  msg.sender === username ? "bg-green-900/20 border border-green-800 text-green-400" : "bg-zinc-900 border border-zinc-800 text-zinc-300"
+                }`}>
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+            <div ref={scrollRef} />
+          </div>
+
+          {/* Input Area */}
+          <form onSubmit={sendMessage} className="p-4 border-t border-zinc-800 bg-black/50 flex gap-2">
+            <input
+              type="text"
+              className="flex-1 bg-black border border-zinc-800 p-3 focus:outline-none focus:border-green-800 text-green-500"
+              placeholder="Type transmission..."
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+            />
+            <button type="submit" className="bg-green-900 px-6 font-bold hover:bg-green-700 transition-all text-black">
+              SEND
+            </button>
+          </form>
+        </div>
       )}
     </main>
   );
