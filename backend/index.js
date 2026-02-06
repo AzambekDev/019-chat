@@ -7,26 +7,24 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-// 1. IMPORT MODELS
 const Message = require('./models/Message'); 
 const User = require('./models/User');
 
-// 2. INITIALIZE THE APP (This must happen BEFORE app.use)
 const app = express();
 
-// 3. MIDDLEWARE
-app.use(express.json()); // Now 'app' exists, so this works!
+app.use(express.json());
 app.use(cors({
     origin: "https://019-chat.vercel.app",
     methods: ["GET", "POST"]
 }));
 
-// 4. AUTH ROUTES
+// --- AUTH ROUTES ---
 app.post('/api/register', async (req, res) => {
     try {
         const { username, password } = req.body;
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = new User({ username, password: hashedPassword });
+        // Default role is 'user'
+        const newUser = new User({ username, password: hashedPassword, role: 'user' });
         await newUser.save();
         res.status(201).json({ message: "User Created" });
     } catch (err) {
@@ -43,15 +41,12 @@ app.post('/api/login', async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ error: "Invalid credentials" });
 
-        // Create the security token
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'secret123', { expiresIn: '7d' });
         
-        // --- THE CHANGE IS HERE ---
-        // We now send the 'role' back to the frontend so it knows to show Admin buttons
         res.json({ 
             token, 
             username: user.username,
-            role: user.role || 'iloveshirin' // Sends 'admin' or 'user'
+            role: user.role // This will be 'admin' or 'user'
         });
     } catch (err) {
         console.error("LOGIN_ERR:", err);
@@ -59,7 +54,6 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// 5. CREATE HTTP & SOCKET SERVERS
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
@@ -68,12 +62,11 @@ const io = new Server(server, {
     }
 });
 
-// 6. DATABASE CONNECTION
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("--- 019_DATABASE_CONNECTED ---"))
     .catch(err => console.error("DB_ERROR:", err));
 
-// 7. SOCKET LOGIC
+// --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     console.log(`LINK_ESTABLISHED: ${socket.id}`);
 
@@ -82,57 +75,48 @@ io.on('connection', (socket) => {
     });
 
     socket.on('send_message', async (data) => {
-    try {
-        const newMessage = new Message({
-            sender: data.user,
-            text: data.text
-        });
-        const savedMessage = await newMessage.save();
+        try {
+            const newMessage = new Message({ sender: data.user, text: data.text });
+            const savedMessage = await newMessage.save();
+            io.emit('receive_message', savedMessage); 
+        } catch (err) {
+            console.error("SEND_ERROR:", err);
+        }
+    });
 
-        // IMPORTANT: We emit the 'savedMessage' because it now has the _id from MongoDB
-        io.emit('receive_message', savedMessage); 
-    } catch (err) {
-        console.error("SEND_ERROR:", err);
-    }
-});
-
-    // --- DELETE A SINGLE MESSAGE ---
+    // --- DELETE LOGIC ---
     socket.on('delete_message', async (data) => {
-    try {
-        const { messageId, username } = data;
-        
-        // Find the message and the user in the database
-        const message = await Message.findById(messageId);
-        const user = await User.findOne({ username });
+        try {
+            const { messageId, username } = data;
+            const message = await Message.findById(messageId);
+            const user = await User.findOne({ username });
 
-        if (!message) {
-            console.log("DELETE_FAILED: Message not found in DB");
-            return;
+            if (!message || !user) return;
+
+            // IS OWNER OR IS ADMIN (Checking for 'admin' role OR your specific name)
+            const isOwner = message.sender === username;
+            const isAdmin = user.role === 'admin' || username === 'iloveshirin';
+
+            if (isOwner || isAdmin) {
+                await Message.findByIdAndDelete(messageId);
+                io.emit('message_deleted', messageId);
+                console.log(`SUCCESS: Deleted by ${username}`);
+            } else {
+                console.log(`DENIED: ${username} attempted deletion`);
+            }
+        } catch (err) {
+            console.error("DELETE_ERROR:", err);
         }
+    });
 
-        // Logic check: Are you the sender OR an admin?
-        const isOwner = message.sender === username;
-        const isAdmin = user && user.role === 'iloveshirin';
-
-        if (isOwner || isAdmin) {
-            await Message.findByIdAndDelete(messageId);
-            io.emit('message_deleted', messageId); // Broadcast to everyone
-            console.log(`SUCCESS: Message ${messageId} deleted by ${username}`);
-        } else {
-            console.log(`DENIED: ${username} is not an owner or admin`);
-        }
-    } catch (err) {
-        console.error("DELETE_ERROR:", err);
-    }
-});
-
-    // --- PURGE ENTIRE CHAT (Admin Only) ---
+    // --- PURGE LOGIC ---
     socket.on('clear_all_messages', async (username) => {
         try {
             const user = await User.findOne({ username });
-            if (user && user.role === 'iloveshirin') {
+            if (user && (user.role === 'admin' || username === 'iloveshirin')) {
                 await Message.deleteMany({});
-                io.emit('chat_cleared'); // Tell everyone to wipe their screen
+                io.emit('chat_cleared');
+                console.log(`--- CHAT_PURGED_BY_${username} ---`);
             }
         } catch (err) {
             console.error("PURGE_ERROR:", err);
@@ -140,7 +124,6 @@ io.on('connection', (socket) => {
     });
 });
 
-// 8. START
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
     console.log(`019_PROTOCOL_ONLINE_ON_PORT_${PORT}`);

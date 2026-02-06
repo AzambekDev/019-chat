@@ -7,10 +7,10 @@ export default function Home() {
   // --- STATES ---
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [isRegistering, setIsRegistering] = useState(false); // Toggle for Login/Register
+  const [isRegistering, setIsRegistering] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [message, setMessage] = useState("");
-  const [chat, setChat] = useState<{ sender: string; text: string; time?: string }[]>([]);
+  const [chat, setChat] = useState<{ sender: string; text: string; _id?: string }[]>([]);
   const [mounted, setMounted] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -33,7 +33,7 @@ export default function Home() {
     });
 
     socket.on("message_deleted", (id) => {
-      setChat((prev) => prev.filter((msg: any) => msg._id !== id));
+      setChat((prev) => prev.filter((msg: any) => (msg._id || msg.id) !== id));
     });
 
     socket.on("chat_cleared", () => {
@@ -72,6 +72,7 @@ export default function Home() {
         } else {
           localStorage.setItem("019_token", data.token);
           localStorage.setItem("019_operator_name", data.username);
+          localStorage.setItem("019_role", data.role); // Important for Admin UI
           setIsLoggedIn(true);
           socket.connect();
         }
@@ -85,8 +86,7 @@ export default function Home() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("019_operator_name");
-    localStorage.removeItem("019_token");
+    localStorage.clear();
     window.location.reload();
   };
 
@@ -114,28 +114,21 @@ export default function Home() {
             <input
               type="text"
               placeholder="OPERATOR_HANDLE"
-              className="bg-black border border-green-800 p-3 w-full text-green-500 focus:outline-none focus:border-green-400 placeholder:text-green-900"
+              className="bg-black border border-green-800 p-3 w-full text-green-500 focus:outline-none focus:border-green-400"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />
             <input
               type="password"
               placeholder="SECURE_PASSCODE"
-              className="bg-black border border-green-800 p-3 w-full text-green-500 focus:outline-none focus:border-green-400 placeholder:text-green-900"
+              className="bg-black border border-green-800 p-3 w-full text-green-500 focus:outline-none focus:border-green-400"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-            <button
-              onClick={handleAuth}
-              className="w-full bg-green-900 hover:bg-green-700 text-black font-bold p-3 transition-all uppercase"
-            >
+            <button onClick={handleAuth} className="w-full bg-green-900 hover:bg-green-700 text-black font-bold p-3 transition-all uppercase">
               {isRegistering ? "Create_Identity" : "Initialize_Link"}
             </button>
-            
-            <button 
-              onClick={() => setIsRegistering(!isRegistering)}
-              className="w-full text-[10px] text-zinc-500 hover:text-green-500 transition-colors uppercase mt-2"
-            >
+            <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[10px] text-zinc-500 hover:text-green-500 uppercase mt-2">
               {isRegistering ? "Back to Login" : "No Identity? Register Here"}
             </button>
           </div>
@@ -149,65 +142,61 @@ export default function Home() {
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               <span className="text-xs uppercase tracking-widest">System_Online // {username}</span>
             </div>
-            <button 
-              onClick={handleLogout}
-              className="text-[10px] bg-red-950/30 border border-red-900 text-red-500 px-3 py-1 rounded hover:bg-red-900 hover:text-white transition-all"
-            >
-              [ TERMINATE_SESSION ]
-            </button>
+            
+            <div className="flex gap-2">
+              {/* Purge Button for iloveshirin or Admins */}
+              {(username === 'iloveshirin' || localStorage.getItem("019_role") === 'admin') && (
+                <button 
+                  onClick={() => socket.emit("clear_all_messages", username)}
+                  className="text-[10px] bg-yellow-950/20 border border-yellow-700 text-yellow-600 px-3 py-1 rounded hover:bg-yellow-700 hover:text-black transition-all"
+                >
+                  [ PURGE ]
+                </button>
+              )}
+              <button onClick={handleLogout} className="text-[10px] bg-red-950/30 border border-red-900 text-red-500 px-3 py-1 rounded hover:bg-red-900">
+                [ TERMINATE ]
+              </button>
+            </div>
           </div>
 
           {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {chat.map((msg: any, index) => (
-                <div key={msg._id || index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
-                  <span className="text-[10px] text-zinc-500 mb-1 uppercase tracking-tighter">{msg.sender}</span>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {chat.map((msg: any, index) => (
+              <div key={msg._id || index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
+                <span className="text-[10px] text-zinc-500 mb-1 uppercase tracking-tighter">{msg.sender}</span>
+                <div className="relative group max-w-[80%] flex items-center gap-2">
+                  
+                  {/* Delete Button logic */}
+                  {(msg.sender === username || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
+                    <button 
+                      onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
+                      className="opacity-0 group-hover:opacity-100 text-red-500 text-[9px] border border-red-900 px-1 rounded hover:bg-red-900 transition-all cursor-pointer h-fit"
+                    >
+                      DEL
+                    </button>
+                  )}
 
-                  {/* 1. Added 'group' and 'relative' here */}
-                  <div className="relative group max-w-[80%] flex items-center gap-2">
-
-                    {/* 2. The Delete Button (shown on hover) */}
-                    {(msg.sender === username || localStorage.getItem("019_role") === "admin") && (
-                      <button 
-                        onClick={() => {
-                          // Check if _id exists, if not try id
-                          const idToDelete = msg._id || msg.id; 
-                          if (idToDelete) {
-                            socket.emit("delete_message", { messageId: idToDelete, username: username });
-                          } else {
-                            console.error("CRITICAL: Message ID is missing!");
-                          }
-                        }}
-                        className="opacity-0 group-hover:opacity-100 text-red-500 text-[10px] border border-red-900 px-1 rounded hover:bg-red-900/20 transition-all cursor-pointer">
-                        [DEL]
-                      </button>
-                    )}
-
-                    {/* The Message Bubble */}
-                    <div className={`p-3 rounded-lg break-words ${
-                      msg.sender === username 
-                        ? "bg-green-900/20 border border-green-800 text-green-400" 
-                        : "bg-zinc-900 border border-zinc-800 text-zinc-300"
-                    }`}>
-                      {msg.text}
-                    </div>
+                  <div className={`p-3 rounded-lg break-words ${
+                    msg.sender === username ? "bg-green-900/20 border border-green-800 text-green-400" : "bg-zinc-900 border border-zinc-800 text-zinc-300"
+                  }`}>
+                    {msg.text}
                   </div>
                 </div>
-              ))}
-              <div ref={scrollRef} />
-            </div>
-
+              </div>
+            ))}
+            <div ref={scrollRef} />
+          </div>
 
           {/* Input Area */}
           <form onSubmit={sendMessage} className="p-4 border-t border-zinc-800 bg-black/50 flex gap-2">
             <input
               type="text"
-              className="flex-1 bg-black border border-zinc-800 p-3 focus:outline-none focus:border-green-800 text-green-500 placeholder:text-zinc-700"
+              className="flex-1 bg-black border border-zinc-800 p-3 focus:outline-none focus:border-green-800 text-green-500"
               placeholder="Type transmission..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
             />
-            <button type="submit" className="bg-green-900 px-6 font-bold hover:bg-green-700 transition-all text-black uppercase">
+            <button type="submit" className="bg-green-900 px-6 font-bold hover:bg-green-700 text-black uppercase">
               Send
             </button>
           </form>
