@@ -32,9 +32,19 @@ export default function Home() {
       setChat((prev) => [...prev, data]);
     });
 
+    socket.on("message_deleted", (id) => {
+      setChat((prev) => prev.filter((msg: any) => msg._id !== id));
+    });
+
+    socket.on("chat_cleared", () => {
+      setChat([]);
+    });
+
     return () => {
       socket.off("load_messages");
       socket.off("receive_message");
+      socket.off("message_deleted");
+      socket.off("chat_cleared");
     };
   }, []);
 
@@ -148,19 +158,42 @@ export default function Home() {
           </div>
 
           {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {chat.map((msg, index) => (
-              <div key={index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
-                <span className="text-[10px] text-zinc-500 mb-1 uppercase tracking-tighter">{msg.sender}</span>
-                <div className={`p-3 rounded-lg max-w-[80%] break-words ${
-                  msg.sender === username ? "bg-green-900/20 border border-green-800 text-green-400" : "bg-zinc-900 border border-zinc-800 text-zinc-300"
-                }`}>
-                  {msg.text}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {chat.map((msg: any, index) => (
+                <div key={msg._id || index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
+                  <span className="text-[10px] text-zinc-500 mb-1 uppercase tracking-tighter">{msg.sender}</span>
+                  
+                  {/* 1. Added 'group' and 'relative' here */}
+                  <div className="relative group max-w-[80%] flex items-center gap-2">
+                    
+                    {/* 2. The Delete Button (shown on hover) */}
+                    {(msg.sender === username || localStorage.getItem("019_role") === "admin") && (
+                      <button 
+                        onClick={() => {
+                          if(confirm("PERMANENTLY_DELETE_TRANSMISSION?")) {
+                            socket.emit("delete_message", { messageId: msg._id, username });
+                          }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 order-last text-[9px] text-red-500 border border-red-900/50 px-1 rounded hover:bg-red-900/20 transition-all cursor-pointer h-fit"
+                      >
+                        [DEL]
+                      </button>
+                    )}
+            
+                    {/* The Message Bubble */}
+                    <div className={`p-3 rounded-lg break-words ${
+                      msg.sender === username 
+                        ? "bg-green-900/20 border border-green-800 text-green-400" 
+                        : "bg-zinc-900 border border-zinc-800 text-zinc-300"
+                    }`}>
+                      {msg.text}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
-            <div ref={scrollRef} />
-          </div>
+              ))}
+              <div ref={scrollRef} />
+            </div>
+
 
           {/* Input Area */}
           <form onSubmit={sendMessage} className="p-4 border-t border-zinc-800 bg-black/50 flex gap-2">

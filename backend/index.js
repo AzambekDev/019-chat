@@ -85,6 +85,38 @@ io.on('connection', (socket) => {
             console.error("TX_ERR:", err);
         }
     });
+
+    // --- DELETE A SINGLE MESSAGE ---
+    socket.on('delete_message', async (data) => {
+        try {
+            const { messageId, username } = data;
+            const user = await User.findOne({ username });
+            const message = await Message.findById(messageId);
+
+            if (!message || !user) return;
+
+            // Permission: Is it their own message OR are they an admin?
+            if (message.sender === username || user.role === 'admin') {
+                await Message.findByIdAndDelete(messageId);
+                io.emit('message_deleted', messageId); // Tell everyone to remove it
+            }
+        } catch (err) {
+            console.error("DELETE_ERROR:", err);
+        }
+    });
+
+    // --- PURGE ENTIRE CHAT (Admin Only) ---
+    socket.on('clear_all_messages', async (username) => {
+        try {
+            const user = await User.findOne({ username });
+            if (user && user.role === 'admin') {
+                await Message.deleteMany({});
+                io.emit('chat_cleared'); // Tell everyone to wipe their screen
+            }
+        } catch (err) {
+            console.error("PURGE_ERROR:", err);
+        }
+    });
 });
 
 // 8. START
