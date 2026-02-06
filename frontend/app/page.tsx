@@ -10,8 +10,14 @@ export default function Home() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [message, setMessage] = useState("");
-  const [chat, setChat] = useState<{ sender: string; text: string; _id?: string }[]>([]);
+  const [chat, setChat] = useState<{ sender: string; text?: string; gif?: string; _id?: string }[]>([]);
   const [mounted, setMounted] = useState(false);
+  
+  // --- GIPHY STATES ---
+  const [showGifs, setShowGifs] = useState(false);
+  const [gifSearch, setGifSearch] = useState("");
+  const [gifs, setGifs] = useState<any[]>([]);
+
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // --- 1. PERSISTENCE & SOCKET SETUP ---
@@ -52,7 +58,7 @@ export default function Home() {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
 
-  // --- 2. AUTH FUNCTIONS ---
+  // --- 2. AUTH & CHAT FUNCTIONS ---
   const handleAuth = async () => {
     const endpoint = isRegistering ? "register" : "login";
     try {
@@ -72,7 +78,7 @@ export default function Home() {
         } else {
           localStorage.setItem("019_token", data.token);
           localStorage.setItem("019_operator_name", data.username);
-          localStorage.setItem("019_role", data.role); // Important for Admin UI
+          localStorage.setItem("019_role", data.role);
           setIsLoggedIn(true);
           socket.connect();
         }
@@ -98,6 +104,26 @@ export default function Home() {
     }
   };
 
+  // --- GIPHY LOGIC ---
+  const searchGifs = async () => {
+    if (!gifSearch.trim()) return;
+    const GIPHY_KEY = process.env.NEXT_PUBLIC_GIPHY_KEY;
+    try {
+      const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${gifSearch}&limit=12&rating=g`);
+      const { data } = await res.json();
+      setGifs(data);
+    } catch (err) {
+      console.error("Giphy Error:", err);
+    }
+  };
+
+  const sendGif = (url: string) => {
+    socket.emit("send_message", { user: username, gif: url });
+    setShowGifs(false);
+    setGifSearch("");
+    setGifs([]);
+  };
+
   if (!mounted) return null;
 
   return (
@@ -109,7 +135,6 @@ export default function Home() {
             {isRegistering ? "Register_New_Operator" : "Protocol_019 // Auth"}
           </h1>
           <p className="text-[10px] text-green-800 mb-6 text-center tracking-[0.2em]">SECURE_TERMINAL_v2.0</p>
-          
           <div className="space-y-4">
             <input
               type="text"
@@ -142,9 +167,7 @@ export default function Home() {
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               <span className="text-xs uppercase tracking-widest">System_Online // {username}</span>
             </div>
-            
             <div className="flex gap-2">
-              {/* Purge Button for iloveshirin or Admins */}
               {(username === 'iloveshirin' || localStorage.getItem("019_role") === 'admin') && (
                 <button 
                   onClick={() => socket.emit("clear_all_messages", username)}
@@ -165,21 +188,19 @@ export default function Home() {
               <div key={msg._id || index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
                 <span className="text-[10px] text-zinc-500 mb-1 uppercase tracking-tighter">{msg.sender}</span>
                 <div className="relative group max-w-[80%] flex items-center gap-2">
-                  
-                  {/* Delete Button logic */}
                   {(msg.sender === username || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
                     <button 
                       onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
-                      className="opacity-0 group-hover:opacity-100 text-red-500 text-[9px] border border-red-900 px-1 rounded hover:bg-red-900 transition-all cursor-pointer h-fit"
+                      className="opacity-0 group-hover:opacity-100 text-red-500 text-[9px] border border-red-900 px-1 rounded hover:bg-red-900 transition-all h-fit"
                     >
                       DEL
                     </button>
                   )}
-
                   <div className={`p-3 rounded-lg break-words ${
                     msg.sender === username ? "bg-green-900/20 border border-green-800 text-green-400" : "bg-zinc-900 border border-zinc-800 text-zinc-300"
                   }`}>
-                    {msg.text}
+                    {msg.text && <p>{msg.text}</p>}
+                    {msg.gif && <img src={msg.gif} alt="gif" className="rounded mt-2 max-w-full border border-green-900/30" />}
                   </div>
                 </div>
               </div>
@@ -187,8 +208,41 @@ export default function Home() {
             <div ref={scrollRef} />
           </div>
 
+          {/* GIF Picker Overlay */}
+          {showGifs && (
+            <div className="mx-4 mb-2 p-3 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl max-h-60 overflow-y-auto">
+               <div className="flex gap-2 mb-3">
+                  <input 
+                    className="flex-1 bg-black border border-zinc-700 p-2 text-xs text-green-500 focus:outline-none"
+                    placeholder="SEARCH_GIPHY..."
+                    value={gifSearch}
+                    onChange={(e) => setGifSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && searchGifs()}
+                  />
+                  <button onClick={searchGifs} className="bg-green-900 text-black px-3 text-xs font-bold">FETCH</button>
+               </div>
+               <div className="grid grid-cols-3 gap-2">
+                  {gifs.map((g) => (
+                    <img 
+                      key={g.id} 
+                      src={g.images.fixed_height_small.url} 
+                      className="cursor-pointer hover:opacity-70 transition-all rounded border border-zinc-800"
+                      onClick={() => sendGif(g.images.fixed_height.url)}
+                    />
+                  ))}
+               </div>
+            </div>
+          )}
+
           {/* Input Area */}
-          <form onSubmit={sendMessage} className="p-4 border-t border-zinc-800 bg-black/50 flex gap-2">
+          <form onSubmit={sendMessage} className="p-4 border-t border-zinc-800 bg-black/50 flex gap-2 items-center">
+            <button 
+              type="button"
+              onClick={() => setShowGifs(!showGifs)}
+              className={`px-3 py-2 border text-[10px] transition-all font-bold ${showGifs ? "bg-green-900 text-black border-green-400" : "bg-zinc-900 text-green-700 border-zinc-700 hover:text-green-500"}`}
+            >
+              GIF
+            </button>
             <input
               type="text"
               className="flex-1 bg-black border border-zinc-800 p-3 focus:outline-none focus:border-green-800 text-green-500"
@@ -196,7 +250,7 @@ export default function Home() {
               value={message}
               onChange={(e) => setMessage(e.target.value)}
             />
-            <button type="submit" className="bg-green-900 px-6 font-bold hover:bg-green-700 text-black uppercase">
+            <button type="submit" className="bg-green-900 px-6 py-3 font-bold hover:bg-green-700 text-black uppercase text-sm">
               Send
             </button>
           </form>

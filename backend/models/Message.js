@@ -17,6 +17,9 @@ const MessageSchema = new mongoose.Schema({
     type: Date, 
     default: Date.now 
   },
+
+  //GIF system
+  gif: { type: String }
 });
 
 module.exports = mongoose.model('Message', MessageSchema);

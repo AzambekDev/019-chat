@@ -23,7 +23,6 @@ app.post('/api/register', async (req, res) => {
     try {
         const { username, password } = req.body;
         const hashedPassword = await bcrypt.hash(password, 10);
-        // Default role is 'user'
         const newUser = new User({ username, password: hashedPassword, role: 'user' });
         await newUser.save();
         res.status(201).json({ message: "User Created" });
@@ -46,7 +45,7 @@ app.post('/api/login', async (req, res) => {
         res.json({ 
             token, 
             username: user.username,
-            role: user.role // This will be 'admin' or 'user'
+            role: user.role 
         });
     } catch (err) {
         console.error("LOGIN_ERR:", err);
@@ -74,9 +73,14 @@ io.on('connection', (socket) => {
         socket.emit('load_messages', messages);
     });
 
+    // --- UPDATED SEND_MESSAGE FOR GIFs ---
     socket.on('send_message', async (data) => {
         try {
-            const newMessage = new Message({ sender: data.user, text: data.text });
+            const newMessage = new Message({ 
+                sender: data.user, 
+                text: data.text || "", 
+                gif: data.gif || "" // Added GIF support here
+            });
             const savedMessage = await newMessage.save();
             io.emit('receive_message', savedMessage); 
         } catch (err) {
@@ -93,7 +97,6 @@ io.on('connection', (socket) => {
 
             if (!message || !user) return;
 
-            // IS OWNER OR IS ADMIN (Checking for 'admin' role OR your specific name)
             const isOwner = message.sender === username;
             const isAdmin = user.role === 'admin' || username === 'iloveshirin';
 
