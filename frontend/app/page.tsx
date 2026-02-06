@@ -39,14 +39,21 @@ export default function Home() {
     if (savedUser && token) {
       setUsername(savedUser);
       setIsLoggedIn(true);
-      socket.connect();
+      if (!socket.connected) socket.connect();
     }
 
-    socket.on("load_messages", (messages: Message[]) => setChat(messages));
+    // Socket Event Listeners
+    socket.on("load_messages", (messages: Message[]) => {
+      setChat(messages);
+    });
+
     socket.on("receive_message", (data: Message) => {
-      // DEBUG: Verify the data structure arriving from the backend
-      console.log("019_TRANSMISSION_RECEIVED:", data);
-      setChat((prev) => [...prev, data]);
+      console.log("019_INCOMING_TRANSMISSION:", data);
+      setChat((prev) => {
+        // Prevent duplicate messages if already in state
+        const exists = prev.some(m => m._id === data._id && data._id !== undefined);
+        return exists ? prev : [...prev, data];
+      });
     });
 
     socket.on("message_deleted", (id: string) => {
@@ -65,11 +72,12 @@ export default function Home() {
     };
   }, []);
 
+  // Auto-scroll to bottom
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
 
-  // --- 2. AUTH & CHAT FUNCTIONS ---
+  // --- 2. AUTH FUNCTIONS ---
   const handleAuth = async () => {
     const endpoint = isRegistering ? "register" : "login";
     try {
@@ -107,16 +115,16 @@ export default function Home() {
     window.location.reload();
   };
 
-  // --- SOCKET EMITTER FIX (TEXT) ---
+  // --- 3. CHAT LOGIC ---
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (message.trim()) {
-      // FIX: Explicitly send an empty gif string so the database schema remains valid
-      socket.emit("send_message", { 
+      const payload = { 
         user: username, 
         text: message, 
         gif: "" 
-      });
+      };
+      socket.emit("send_message", payload);
       setMessage("");
     }
   };
@@ -130,18 +138,29 @@ export default function Home() {
       const { data } = await res.json();
       setGifs(data);
     } catch (err) {
-      console.error("Giphy Error:", err);
+      console.error("Giphy Search Failure:", err);
     }
   };
 
-  // --- SOCKET EMITTER FIX (GIF) ---
   const sendGif = (url: string) => {
-    // FIX: Send an empty text string to ensure the message is accepted by the backend
-    socket.emit("send_message", { 
+    if (!url) return;
+
+    // PRECAUTION: Verify connection before emitting
+    if (!socket.connected) {
+      console.warn("SOCKET_OFFLINE: RECONNECTING...");
+      socket.connect();
+    }
+
+    const payload = { 
       user: username, 
       text: "", 
       gif: url 
-    });
+    };
+
+    console.log("019_DISPATCHING_GIF_PAYLOAD:", payload);
+    socket.emit("send_message", payload);
+
+    // UI State Reset
     setShowGifs(false);
     setGifSearch("");
     setGifs([]);
@@ -193,13 +212,13 @@ export default function Home() {
             <div className="flex gap-2">
               {(username === 'iloveshirin' || localStorage.getItem("019_role") === 'admin') && (
                 <button 
-                  onClick={() => socket.emit("clear_all_messages", username)}
+                  onClick={() => { if(confirm("CONFIRM_GLOBAL_PURGE?")) socket.emit("clear_all_messages", username) }}
                   className="text-[10px] bg-yellow-950/20 border border-yellow-700 text-yellow-600 px-3 py-1 rounded hover:bg-yellow-700 hover:text-black transition-all"
                 >
                   [ PURGE ]
                 </button>
               )}
-              <button onClick={handleLogout} className="text-[10px] bg-red-950/30 border border-red-900 text-red-500 px-3 py-1 rounded hover:bg-red-900">
+              <button onClick={handleLogout} className="text-[10px] bg-red-950/30 border border-red-900 text-red-500 px-3 py-1 rounded hover:bg-red-900 transition-all">
                 [ TERMINATE ]
               </button>
             </div>
@@ -214,7 +233,7 @@ export default function Home() {
                   {(msg.sender === username || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
                     <button 
                       onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
-                      className="opacity-0 group-hover:opacity-100 text-red-500 text-[9px] border border-red-900 px-1 rounded hover:bg-red-900 transition-all h-fit"
+                      className="opacity-0 group-hover:opacity-100 text-red-500 text-[9px] border border-red-900 px-1 rounded hover:bg-red-900 transition-all cursor-pointer h-fit"
                     >
                       DEL
                     </button>
@@ -222,14 +241,14 @@ export default function Home() {
                   <div className={`p-3 rounded-lg break-words ${
                     msg.sender === username ? "bg-green-900/20 border border-green-800 text-green-400" : "bg-zinc-900 border border-zinc-800 text-zinc-300"
                   }`}>
-                    {msg.text && <p>{msg.text}</p>}
-                    {/* Render GIF if present */}
+                    {msg.text && <p className="leading-relaxed">{msg.text}</p>}
                     {msg.gif && (
-                        <img 
-                          src={msg.gif} 
-                          alt="gif" 
-                          className="rounded mt-2 max-w-full border border-green-900/30 shadow-lg" 
-                        />
+                      <img 
+                        src={msg.gif} 
+                        alt="transmission-gif" 
+                        className="rounded mt-2 max-w-full border border-green-900/30 shadow-lg" 
+                        loading="lazy"
+                      />
                     )}
                   </div>
                 </div>
@@ -243,20 +262,20 @@ export default function Home() {
             <div className="mx-4 mb-2 p-3 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl max-h-60 overflow-y-auto">
                <div className="flex gap-2 mb-3">
                   <input 
-                    className="flex-1 bg-black border border-zinc-700 p-2 text-xs text-green-500 focus:outline-none"
+                    className="flex-1 bg-black border border-zinc-700 p-2 text-xs text-green-500 focus:outline-none focus:border-green-500"
                     placeholder="SEARCH_GIPHY..."
                     value={gifSearch}
                     onChange={(e) => setGifSearch(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && searchGifs()}
                   />
-                  <button onClick={searchGifs} className="bg-green-900 text-black px-3 text-xs font-bold">FETCH</button>
+                  <button onClick={searchGifs} className="bg-green-900 text-black px-3 text-xs font-bold hover:bg-green-700">FETCH</button>
                </div>
                <div className="grid grid-cols-3 gap-2">
                   {gifs.map((g) => (
                     <img 
                       key={g.id} 
                       src={g.images.fixed_height_small.url} 
-                      className="cursor-pointer hover:opacity-70 transition-all rounded border border-zinc-800"
+                      className="cursor-pointer hover:opacity-70 transition-all rounded border border-zinc-800 w-full"
                       onClick={() => sendGif(g.images.fixed_height.url)}
                     />
                   ))}
@@ -280,7 +299,7 @@ export default function Home() {
               value={message}
               onChange={(e) => setMessage(e.target.value)}
             />
-            <button type="submit" className="bg-green-900 px-6 py-3 font-bold hover:bg-green-700 text-black uppercase text-sm">
+            <button type="submit" className="bg-green-900 px-6 py-3 font-bold hover:bg-green-700 text-black uppercase text-sm transition-all">
               Send
             </button>
           </form>
