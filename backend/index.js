@@ -1,64 +1,71 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const mongoose = require('mongoose');
 const cors = require('cors');
-const mongoose = require('mongoose'); // Add this
 require('dotenv').config();
 
+// 1. IMPORT MODELS (Check that this path matches your folder name)
+const Message = require('./models/Message'); 
+
 const app = express();
-app.use(cors());
 
-// --- MONGODB CONNECTION ---
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('✅ 019 Database Connected Successfully'))
-    .catch((err) => console.error('❌ Database Connection Error:', err));
-
-const io = new Server(server, {
-  cors: {
-    origin: "https://your-019-app.vercel.app", // Your ACTUAL Vercel URL
+// 2. CONFIGURE CORS FOR YOUR VERCEL URL
+app.use(cors({
+    origin: "https://019-chat.vercel.app",
     methods: ["GET", "POST"]
-  }
+}));
+
+// 3. CREATE SERVERS IN CORRECT ORDER
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: "https://019-chat.vercel.app",
+        methods: ["GET", "POST"]
+    }
 });
 
-const Message = require('./models/Message'); // Import the model at the top
+// 4. DATABASE CONNECTION
+const MONGO_URI = process.env.MONGO_URI;
+mongoose.connect(MONGO_URI)
+    .then(() => console.log("--- DATABASE_SYNC_COMPLETE ---"))
+    .catch(err => console.error("!!! DB_SYNC_FAILURE:", err));
 
-io.on('connection', async (socket) => {
-    console.log('User connected to 019:', socket.id);
+// 5. SOCKET LOGIC
+io.on('connection', (socket) => {
+    console.log(`LINK_ESTABLISHED: ${socket.id}`);
 
-    // 1. Fetch old messages from MongoDB and send them to the new user
-    try {
-        const existingMessages = await Message.find().sort({ timestamp: 1 }).limit(50);
-        socket.emit('load_messages', existingMessages.map(m => m.text));
-    } catch (err) {
-        console.error(err);
-    }
-
-    // 2. Handle new incoming messages
-    socket.on('send_message', async (data) => {
-    try {
-        // 'data' is the object { user: '...', text: '...' }
-        // We need to map these to the correct schema fields
-        const newMessage = new Message({ 
-            sender: data.user,  // Map 'user' from frontend to 'sender' in DB
-            text: data.text     // Map 'text' from frontend to 'text' in DB
+    // Load history
+    Message.find().sort({ timestamp: 1 }).limit(50)
+        .then(messages => {
+            socket.emit('load_messages', messages);
         });
-        
-        // Save to MongoDB
-        await newMessage.save();
 
-        // Broadcast the object back to everyone so the UI can render it
-        io.emit('receive_message', {
-    sender: data.user,
-    text: data.text,
-    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-});
-    } catch (err) {
-        console.error("Error saving message:", err);
-    }
-});
+    socket.on('send_message', async (data) => {
+        try {
+            const newMessage = new Message({
+                sender: data.user || "Unknown_Operator",
+                text: data.text
+            });
+            await newMessage.save();
+
+            io.emit('receive_message', {
+                sender: newMessage.sender,
+                text: newMessage.text,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            });
+        } catch (err) {
+            console.error("TRANSMISSION_ERROR:", err);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        console.log(`LINK_TERMINATED: ${socket.id}`);
+    });
 });
 
+// 6. RENDER PORT BINDING
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
-    console.log(`🚀 019 Server spinning on port ${PORT}`);
+    console.log(`019_PROTOCOL_LIVE_ON_PORT_${PORT}`);
 });
