@@ -3,19 +3,28 @@
 import { useState, useEffect, useRef } from "react";
 import { socket } from "@/lib/socket";
 
+// --- TYPESCRIPT INTERFACES ---
+interface Message {
+  sender: string;
+  text?: string;
+  gif?: string;
+  _id?: string;
+  id?: string;
+}
+
 export default function Home() {
   // --- STATES ---
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [message, setMessage] = useState("");
-  const [chat, setChat] = useState<{ sender: string; text?: string; gif?: string; _id?: string }[]>([]);
-  const [mounted, setMounted] = useState(false);
+  const [username, setUsername] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [isRegistering, setIsRegistering] = useState<boolean>(false);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [message, setMessage] = useState<string>("");
+  const [chat, setChat] = useState<Message[]>([]);
+  const [mounted, setMounted] = useState<boolean>(false);
   
   // --- GIPHY STATES ---
-  const [showGifs, setShowGifs] = useState(false);
-  const [gifSearch, setGifSearch] = useState("");
+  const [showGifs, setShowGifs] = useState<boolean>(false);
+  const [gifSearch, setGifSearch] = useState<string>("");
   const [gifs, setGifs] = useState<any[]>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -33,13 +42,15 @@ export default function Home() {
       socket.connect();
     }
 
-    socket.on("load_messages", (messages) => setChat(messages));
-    socket.on("receive_message", (data) => {
+    socket.on("load_messages", (messages: Message[]) => setChat(messages));
+    socket.on("receive_message", (data: Message) => {
+      // DEBUG: Verify the data structure arriving from the backend
+      console.log("019_TRANSMISSION_RECEIVED:", data);
       setChat((prev) => [...prev, data]);
     });
 
-    socket.on("message_deleted", (id) => {
-      setChat((prev) => prev.filter((msg: any) => (msg._id || msg.id) !== id));
+    socket.on("message_deleted", (id: string) => {
+      setChat((prev) => prev.filter((msg) => (msg._id || msg.id) !== id));
     });
 
     socket.on("chat_cleared", () => {
@@ -96,10 +107,16 @@ export default function Home() {
     window.location.reload();
   };
 
+  // --- SOCKET EMITTER FIX (TEXT) ---
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (message.trim()) {
-      socket.emit("send_message", { user: username, text: message });
+      // FIX: Explicitly send an empty gif string so the database schema remains valid
+      socket.emit("send_message", { 
+        user: username, 
+        text: message, 
+        gif: "" 
+      });
       setMessage("");
     }
   };
@@ -117,8 +134,14 @@ export default function Home() {
     }
   };
 
+  // --- SOCKET EMITTER FIX (GIF) ---
   const sendGif = (url: string) => {
-    socket.emit("send_message", { user: username, gif: url });
+    // FIX: Send an empty text string to ensure the message is accepted by the backend
+    socket.emit("send_message", { 
+      user: username, 
+      text: "", 
+      gif: url 
+    });
     setShowGifs(false);
     setGifSearch("");
     setGifs([]);
@@ -184,7 +207,7 @@ export default function Home() {
 
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {chat.map((msg: any, index) => (
+            {chat.map((msg, index) => (
               <div key={msg._id || index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
                 <span className="text-[10px] text-zinc-500 mb-1 uppercase tracking-tighter">{msg.sender}</span>
                 <div className="relative group max-w-[80%] flex items-center gap-2">
@@ -200,7 +223,14 @@ export default function Home() {
                     msg.sender === username ? "bg-green-900/20 border border-green-800 text-green-400" : "bg-zinc-900 border border-zinc-800 text-zinc-300"
                   }`}>
                     {msg.text && <p>{msg.text}</p>}
-                    {msg.gif && <img src={msg.gif} alt="gif" className="rounded mt-2 max-w-full border border-green-900/30" />}
+                    {/* Render GIF if present */}
+                    {msg.gif && (
+                        <img 
+                          src={msg.gif} 
+                          alt="gif" 
+                          className="rounded mt-2 max-w-full border border-green-900/30 shadow-lg" 
+                        />
+                    )}
                   </div>
                 </div>
               </div>
