@@ -43,9 +43,18 @@ app.post('/api/login', async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ error: "Invalid credentials" });
 
+        // Create the security token
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'secret123', { expiresIn: '7d' });
-        res.json({ token, username: user.username });
+        
+        // --- THE CHANGE IS HERE ---
+        // We now send the 'role' back to the frontend so it knows to show Admin buttons
+        res.json({ 
+            token, 
+            username: user.username,
+            role: user.role || 'iloveshirin' // Sends 'admin' or 'user'
+        });
     } catch (err) {
+        console.error("LOGIN_ERR:", err);
         res.status(500).json({ error: "Login error" });
     }
 });
