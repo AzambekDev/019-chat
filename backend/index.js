@@ -10,20 +10,22 @@ const Message = require('./models/Message');
 
 const app = express();
 
-// 2. CONFIGURE CORS FOR YOUR VERCEL URL
+
+
 app.use(cors({
-    origin: "https://019-chat.vercel.app",
+    origin: "*", // Allows any site to connect for testing
     methods: ["GET", "POST"]
 }));
 
-// 3. CREATE SERVERS IN CORRECT ORDER
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "https://019-chat.vercel.app",
+        origin: "*", // Matches the app.use above
         methods: ["GET", "POST"]
-    }
+    },
+    transports: ['websocket'] // Matches the frontend setting
 });
+
 
 // 4. DATABASE CONNECTION
 const MONGO_URI = process.env.MONGO_URI;
