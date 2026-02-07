@@ -21,11 +21,7 @@ export default function Home() {
   const [message, setMessage] = useState<string>("");
   const [chat, setChat] = useState<Message[]>([]);
   const [mounted, setMounted] = useState<boolean>(false);
-  
-  // --- NEW: COIN STATE ---
   const [coins, setCoins] = useState<number>(0);
-  
-  // --- GIPHY STATES ---
   const [showGifs, setShowGifs] = useState<boolean>(false);
   const [gifSearch, setGifSearch] = useState<string>("");
   const [gifs, setGifs] = useState<any[]>([]);
@@ -35,7 +31,6 @@ export default function Home() {
   // --- 1. PERSISTENCE & SOCKET SETUP ---
   useEffect(() => {
     setMounted(true);
-    
     const savedUser = localStorage.getItem("019_operator_name");
     const token = localStorage.getItem("019_token");
 
@@ -45,30 +40,18 @@ export default function Home() {
       if (!socket.connected) socket.connect();
     }
 
-    // Socket Event Listeners
-    socket.on("load_messages", (messages: Message[]) => {
-      setChat(messages);
-    });
-
+    socket.on("load_messages", (messages: Message[]) => setChat(messages));
     socket.on("receive_message", (data: Message) => {
       setChat((prev) => {
         const exists = prev.some(m => m._id === data._id && data._id !== undefined);
         return exists ? prev : [...prev, data];
       });
     });
-
-    // --- NEW: COIN UPDATE LISTENER ---
-    socket.on("coin_update", (newBalance: number) => {
-      setCoins(newBalance);
-    });
-
+    socket.on("coin_update", (newBalance: number) => setCoins(newBalance));
     socket.on("message_deleted", (id: string) => {
       setChat((prev) => prev.filter((msg) => (msg._id || msg.id) !== id));
     });
-
-    socket.on("chat_cleared", () => {
-      setChat([]);
-    });
+    socket.on("chat_cleared", () => setChat([]));
 
     return () => {
       socket.off("load_messages");
@@ -92,9 +75,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password })
       });
-      
       const data = await res.json();
-      
       if (res.ok) {
         if (isRegistering) {
           alert("REGISTRATION_SUCCESSFUL // PLEASE_LOGIN");
@@ -104,10 +85,7 @@ export default function Home() {
           localStorage.setItem("019_token", data.token);
           localStorage.setItem("019_operator_name", data.username);
           localStorage.setItem("019_role", data.role);
-          
-          // SET INITIAL COINS FROM LOGIN DATA
           setCoins(data.coins || 0);
-          
           setIsLoggedIn(true);
           socket.connect();
         }
@@ -115,7 +93,6 @@ export default function Home() {
         alert(`ACCESS_DENIED: ${data.error || "INVALID_CREDENTIALS"}`);
       }
     } catch (err) {
-      console.error("Auth Error:", err);
       alert("CONNECTION_FAILURE_TO_CORE");
     }
   };
@@ -125,21 +102,14 @@ export default function Home() {
     window.location.reload();
   };
 
-  // --- 3. CHAT LOGIC ---
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (message.trim()) {
-      const payload = { 
-        user: username, 
-        text: message, 
-        gif: "" 
-      };
-      socket.emit("send_message", payload);
+      socket.emit("send_message", { user: username, text: message, gif: "" });
       setMessage("");
     }
   };
 
-  // --- GIPHY LOGIC ---
   const searchGifs = async () => {
     if (!gifSearch.trim()) return;
     const GIPHY_KEY = process.env.NEXT_PUBLIC_GIPHY_KEY;
@@ -154,11 +124,7 @@ export default function Home() {
 
   const sendGif = (url: string) => {
     if (!url) return;
-    if (!socket.connected) socket.connect();
-
-    const payload = { user: username, text: "", gif: url };
-    socket.emit("send_message", payload);
-
+    socket.emit("send_message", { user: username, text: "", gif: url });
     setShowGifs(false);
     setGifSearch("");
     setGifs([]);
@@ -167,143 +133,136 @@ export default function Home() {
   if (!mounted) return null;
 
   return (
-    <main className="min-h-screen bg-black text-green-500 font-mono p-4 flex flex-col items-center justify-center">
+    <main className="min-h-screen bg-[#050505] text-green-500 font-mono flex items-center justify-center p-2 sm:p-4">
       {!isLoggedIn ? (
-        <div className="border border-green-900 p-8 bg-zinc-950 rounded-lg shadow-2xl w-full max-w-md">
-          <h1 className="text-2xl mb-2 tracking-tighter uppercase font-bold text-center">
-            {isRegistering ? "Register_New_Operator" : "Protocol_019 // Auth"}
-          </h1>
-          <p className="text-[10px] text-green-800 mb-6 text-center tracking-[0.2em]">SECURE_TERMINAL_v2.0</p>
+        /* --- AUTH SCREEN --- */
+        <div className="w-full max-w-sm border border-green-900 bg-black p-8 rounded-sm shadow-[0_0_40px_rgba(0,255,0,0.05)]">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-black italic tracking-tighter uppercase">Protocol_019</h1>
+            <p className="text-[9px] tracking-[0.4em] text-green-900 uppercase mt-1">Encrypted_Access_Only</p>
+          </div>
           <div className="space-y-4">
-            <input
-              type="text"
-              placeholder="OPERATOR_HANDLE"
-              className="bg-black border border-green-800 p-3 w-full text-green-500 focus:outline-none focus:border-green-400"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-            <input
-              type="password"
-              placeholder="SECURE_PASSCODE"
-              className="bg-black border border-green-800 p-3 w-full text-green-500 focus:outline-none focus:border-green-400"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <button onClick={handleAuth} className="w-full bg-green-900 hover:bg-green-700 text-black font-bold p-3 transition-all uppercase">
-              {isRegistering ? "Create_Identity" : "Initialize_Link"}
+            <input className="w-full bg-transparent border-b border-green-900 p-2 focus:border-green-500 outline-none transition-all text-sm" placeholder="OPERATOR_ID" value={username} onChange={(e) => setUsername(e.target.value)} />
+            <input type="password" className="w-full bg-transparent border-b border-green-900 p-2 focus:border-green-500 outline-none transition-all text-sm" placeholder="SECURITY_KEY" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <button onClick={handleAuth} className="w-full bg-green-500 text-black font-black py-3 hover:bg-green-400 transition-all uppercase text-sm mt-4 shadow-[0_0_15px_rgba(0,255,0,0.2)]">
+              {isRegistering ? "Register_Identity" : "Establish_Link"}
             </button>
-            <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[10px] text-zinc-500 hover:text-green-500 uppercase mt-2">
-              {isRegistering ? "Back to Login" : "No Identity? Register Here"}
+            <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[9px] text-zinc-600 hover:text-green-700 uppercase tracking-widest mt-2">
+              {isRegistering ? "Back to Login" : "No Identity? Request Entry"}
             </button>
           </div>
         </div>
       ) : (
-        <div className="w-full max-w-2xl h-[85vh] border border-zinc-800 bg-zinc-950 flex flex-col rounded-lg overflow-hidden shadow-2xl">
-          {/* Header */}
-          <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-black/50">
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-xs uppercase tracking-widest font-bold">System_Online // {username}</span>
-              </div>
-              {/* NEW: COIN DISPLAY */}
-              <div className="text-[10px] text-yellow-500 mt-1 flex items-center gap-1">
-                <span className="opacity-50">CREDITS:</span>
-                <span className="font-bold tracking-widest">{coins.toFixed(2)} ⌬</span>
-              </div>
-            </div>
-            
-            <div className="flex gap-2">
-              {(username === 'iloveshirin' || localStorage.getItem("019_role") === 'admin') && (
-                <button 
-                  onClick={() => { if(confirm("CONFIRM_GLOBAL_PURGE?")) socket.emit("clear_all_messages", username) }}
-                  className="text-[10px] bg-yellow-950/20 border border-yellow-700 text-yellow-600 px-3 py-1 rounded hover:bg-yellow-700 hover:text-black transition-all"
-                >
-                  [ PURGE ]
-                </button>
-              )}
-              <button onClick={handleLogout} className="text-[10px] bg-red-950/30 border border-red-900 text-red-500 px-3 py-1 rounded hover:bg-red-900 transition-all">
-                [ TERMINATE ]
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {chat.map((msg, index) => (
-              <div key={msg._id || index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
-                <span className="text-[10px] text-zinc-500 mb-1 uppercase tracking-tighter">{msg.sender}</span>
-                <div className="relative group max-w-[80%] flex items-center gap-2">
-                  {(msg.sender === username || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
-                    <button 
-                      onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
-                      className="opacity-0 group-hover:opacity-100 text-red-500 text-[9px] border border-red-900 px-1 rounded hover:bg-red-900 transition-all cursor-pointer h-fit"
-                    >
-                      DEL
-                    </button>
-                  )}
-                  <div className={`p-3 rounded-lg break-words ${
-                    msg.sender === username ? "bg-green-900/20 border border-green-800 text-green-400" : "bg-zinc-900 border border-zinc-800 text-zinc-300"
-                  }`}>
-                    {msg.text && <p className="leading-relaxed">{msg.text}</p>}
-                    {msg.gif && (
-                      <img 
-                        src={msg.gif} 
-                        alt="transmission-gif" 
-                        className="rounded mt-2 max-w-full border border-green-900/30 shadow-lg" 
-                        loading="lazy"
-                      />
-                    )}
-                  </div>
+        /* --- MAIN INTERFACE --- */
+        <div className="w-full max-w-6xl h-[92vh] grid grid-cols-1 md:grid-cols-[260px_1fr] border border-zinc-900 bg-black rounded-sm overflow-hidden shadow-2xl">
+          
+          {/* SIDEBAR */}
+          <div className="hidden md:flex flex-col border-r border-zinc-900 bg-[#080808] p-6 justify-between">
+            <div>
+              <div className="mb-10">
+                <h2 className="text-xl font-black tracking-tighter italic text-white">019_PROTOCOL</h2>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_green]"></span>
+                  <span className="text-[10px] text-green-800 tracking-widest uppercase font-bold">Terminal_Active</span>
                 </div>
               </div>
-            ))}
-            <div ref={scrollRef} />
+
+              <div className="space-y-8">
+                <div>
+                  <p className="text-[9px] text-zinc-600 mb-1 uppercase tracking-widest font-bold">Operator</p>
+                  <p className="text-sm text-white font-black truncate border-l-2 border-green-600 pl-2">{username}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] text-zinc-600 mb-1 uppercase tracking-widest font-bold">Network_Balance</p>
+                  <p className="text-2xl text-yellow-500 font-black tracking-tighter leading-none">{coins.toFixed(2)} <span className="text-xs ml-1">⌬</span></p>
+                </div>
+              </div>
+            </div>
+
+            <button onClick={handleLogout} className="text-left text-[10px] text-red-900 hover:text-red-500 transition-all uppercase font-black tracking-widest">
+              [ Terminate_Session ]
+            </button>
           </div>
 
-          {showGifs && (
-            <div className="mx-4 mb-2 p-3 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl max-h-60 overflow-y-auto">
-               <div className="flex gap-2 mb-3">
-                  <input 
-                    className="flex-1 bg-black border border-zinc-700 p-2 text-xs text-green-500 focus:outline-none"
-                    placeholder="SEARCH_GIPHY..."
-                    value={gifSearch}
-                    onChange={(e) => setGifSearch(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && searchGifs()}
-                  />
-                  <button onClick={searchGifs} className="bg-green-900 text-black px-3 text-xs font-bold hover:bg-green-700">FETCH</button>
-               </div>
-               <div className="grid grid-cols-3 gap-2">
-                  {gifs.map((g) => (
-                    <img 
-                      key={g.id} 
-                      src={g.images.fixed_height_small.url} 
-                      className="cursor-pointer hover:opacity-70 transition-all rounded border border-zinc-800 w-full"
-                      onClick={() => sendGif(g.images.fixed_height.url)}
-                    />
-                  ))}
-               </div>
+          {/* CHAT AREA */}
+          <div className="flex flex-col h-full bg-[#0a0a0a] relative">
+            {/* Header Mobile Only */}
+            <div className="md:hidden p-4 border-b border-zinc-900 flex justify-between items-center bg-black">
+                <span className="text-xs font-black text-white uppercase">{username}</span>
+                <span className="text-xs text-yellow-500 font-black">{coins.toFixed(2)} ⌬</span>
             </div>
-          )}
 
-          <form onSubmit={sendMessage} className="p-4 border-t border-zinc-800 bg-black/50 flex gap-2 items-center">
-            <button 
-              type="button" 
-              onClick={() => setShowGifs(!showGifs)} 
-              className={`px-3 py-2 border text-[10px] transition-all font-bold ${showGifs ? "bg-green-900 text-black border-green-400" : "bg-zinc-900 text-green-700 border-zinc-700 hover:text-green-500"}`}
-            >
-              GIF
-            </button>
-            <input
-              type="text"
-              className="flex-1 bg-black border border-zinc-800 p-3 focus:outline-none focus:border-green-800 text-green-500"
-              placeholder="Type transmission..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-            />
-            <button type="submit" className="bg-green-900 px-6 py-3 font-bold hover:bg-green-700 text-black uppercase text-sm transition-all">
-              Send
-            </button>
-          </form>
+            {/* Messages Pane */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800">
+              {chat.map((msg, index) => {
+                const isMe = msg.sender === username;
+                return (
+                  <div key={msg._id || index} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                    <div className="max-w-[85%] sm:max-w-[70%] group relative">
+                      <span className={`text-[9px] text-zinc-600 uppercase mb-1.5 block font-bold tracking-tight ${isMe ? "text-right" : "text-left"}`}>
+                        {msg.sender}
+                      </span>
+                      
+                      <div className={`p-4 rounded-sm transition-all relative ${
+                        isMe 
+                        ? "bg-green-500/5 border-r-2 border-green-500 text-green-100" 
+                        : "bg-white/5 border-l-2 border-zinc-700 text-zinc-300"
+                      }`}>
+                        {msg.text && <p className="text-sm leading-relaxed antialiased font-medium">{msg.text}</p>}
+                        {msg.gif && <img src={msg.gif} alt="gif" className="rounded-sm mt-3 w-full max-w-[280px] opacity-90 border border-white/10" />}
+                        
+                        {(isMe || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
+                            <button 
+                                onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
+                                className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity font-bold"
+                            >
+                                DEL
+                            </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={scrollRef} />
+            </div>
+
+            {/* Input & GIF UI */}
+            <div className="p-4 bg-black/80 backdrop-blur-xl border-t border-zinc-900">
+              {showGifs && (
+                <div className="mb-4 bg-[#0d0d0d] border border-zinc-800 p-4 rounded-sm shadow-2xl">
+                   <div className="flex gap-2 mb-4">
+                      <input className="flex-1 bg-black border border-zinc-800 p-2.5 text-xs outline-none focus:border-green-600 text-green-500" placeholder="Search Giphy..." value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs()} />
+                   </div>
+                   <div className="grid grid-cols-3 gap-2 h-48 overflow-y-auto">
+                      {gifs.map((g) => (
+                        <img key={g.id} src={g.images.fixed_height_small.url} className="w-full h-24 object-cover cursor-pointer hover:scale-95 transition-transform rounded-sm border border-transparent hover:border-green-500" onClick={() => sendGif(g.images.fixed_height.url)} />
+                      ))}
+                   </div>
+                </div>
+              )}
+
+              <form onSubmit={sendMessage} className="flex gap-3 items-center">
+                <button type="button" onClick={() => setShowGifs(!showGifs)} className={`px-4 py-3 text-[10px] font-black border transition-all ${showGifs ? "bg-green-500 text-black border-green-500" : "bg-transparent border-zinc-800 text-zinc-500 hover:text-green-500 hover:border-green-500"}`}>
+                  GIF
+                </button>
+                <input type="text" className="flex-1 bg-[#0f0f0f] border border-zinc-800 p-3 text-sm focus:outline-none focus:border-green-900 transition-all text-white placeholder-zinc-800" placeholder="Type transmission..." value={message} onChange={(e) => setMessage(e.target.value)} />
+                <button type="submit" className="bg-zinc-900 border border-zinc-700 px-8 py-3 font-black text-[10px] hover:bg-green-500 hover:text-black hover:border-green-500 transition-all uppercase tracking-widest">
+                  Execute
+                </button>
+              </form>
+            </div>
+
+            {/* Admin Purge Button overlay for iloveshirin (Desktop only) */}
+            {(username === 'iloveshirin' || localStorage.getItem("019_role") === 'admin') && (
+              <button 
+                onClick={() => { if(confirm("PERMANENT_PURGE?")) socket.emit("clear_all_messages", username) }}
+                className="hidden md:block absolute top-4 right-4 text-[8px] text-yellow-900 border border-yellow-900 px-2 py-1 rounded hover:bg-yellow-900 hover:text-black transition-all font-bold uppercase tracking-tighter"
+              >
+                Purge_System
+              </button>
+            )}
+          </div>
         </div>
       )}
     </main>
