@@ -39,22 +39,18 @@ export default function Home() {
   const [mounted, setMounted] = useState<boolean>(false);
   const [coins, setCoins] = useState<number>(0);
   
-  // --- STORE & THEME STATES ---
   const [showShop, setShowShop] = useState<boolean>(false);
   const [activeTheme, setActiveTheme] = useState<string>('default');
   const [unlockedThemes, setUnlockedThemes] = useState<string[]>(['default']);
   
-  // --- GIPHY STATES ---
   const [showGifs, setShowGifs] = useState<boolean>(false);
   const [gifSearch, setGifSearch] = useState<string>("");
   const [gifs, setGifs] = useState<any[]>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Dynamic Theme Color Finder
   const themeColor = THEMES.find(t => t.id === activeTheme)?.color || '#22c55e';
 
-  // --- 1. PERSISTENCE & SOCKET SETUP ---
+  // --- 1.Handshake & Socket Listeners ---
   useEffect(() => {
     setMounted(true);
     const savedUser = localStorage.getItem("019_operator_name");
@@ -95,14 +91,14 @@ export default function Home() {
     };
   }, []);
 
-  // Fixed scroll logic: strictly scrolls inside the chat window
+  // Strict scrolling logic for chat area only
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [chat, showShop]);
 
-  // --- 2. AUTH FUNCTIONS ---
+  // --- 2. Auth & Core Actions ---
   const handleAuth = async () => {
     const endpoint = isRegistering ? "register" : "login";
     try {
@@ -114,7 +110,7 @@ export default function Home() {
       const data = await res.json();
       if (res.ok) {
         if (isRegistering) {
-          alert("REGISTRATION_SUCCESSFUL // PLEASE_LOGIN");
+          alert("REGISTRATION_SUCCESSFUL");
           setIsRegistering(false);
           setPassword("");
         } else {
@@ -128,10 +124,10 @@ export default function Home() {
           socket.connect();
         }
       } else {
-        alert(`ACCESS_DENIED: ${data.error || "INVALID_CREDENTIALS"}`);
+        alert(`ACCESS_DENIED: ${data.error}`);
       }
     } catch (err) {
-      alert("CONNECTION_FAILURE_TO_CORE");
+      alert("CONNECTION_FAILURE");
     }
   };
 
@@ -144,7 +140,7 @@ export default function Home() {
     e.preventDefault();
     const trimmedMsg = message.trim();
     if (trimmedMsg) {
-      // --- ADMIN COMMAND CHECK ---
+      // --- HIDDEN ADMIN COMMAND ---
       if (trimmedMsg === "/sys_grant_100" && (username === 'iloveshirin' || localStorage.getItem("019_role") === "admin")) {
         socket.emit("admin_grant_coins", { username });
         setMessage("");
@@ -186,18 +182,18 @@ export default function Home() {
     <main className="fixed inset-0 bg-[#050505] flex items-center justify-center p-2 sm:p-4 overflow-hidden" style={{ color: themeColor } as CSSProperties}>
       {!isLoggedIn ? (
         /* --- AUTH SCREEN --- */
-        <div className="w-full max-w-sm border bg-black p-8 rounded-sm shadow-[0_0_40px_rgba(0,255,0,0.05)]" style={{ borderColor: themeColor } as CSSProperties}>
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-black italic tracking-tighter uppercase">Protocol_019</h1>
-            <p className="text-[9px] tracking-[0.4em] uppercase mt-1 opacity-50">Encrypted_Access_Only</p>
+        <div className="w-full max-w-sm border bg-black p-8 rounded-sm shadow-2xl" style={{ borderColor: themeColor } as CSSProperties}>
+          <div className="text-center mb-8 uppercase">
+            <h1 className="text-3xl font-black italic tracking-tighter">Protocol_019</h1>
+            <p className="text-[9px] tracking-[0.4em] opacity-50">Encrypted_Access_Only</p>
           </div>
           <div className="space-y-4">
             <input className="w-full bg-transparent border-b p-2 outline-none transition-all text-sm" style={{ borderColor: themeColor } as CSSProperties} placeholder="OPERATOR_ID" value={username} onChange={(e) => setUsername(e.target.value)} />
-            <input type="password" disabled={isRegistering === false && password === "loading"} className="w-full bg-transparent border-b p-2 outline-none transition-all text-sm" style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURITY_KEY" value={password} onChange={(e) => setPassword(e.target.value)} />
-            <button onClick={handleAuth} className="w-full text-black font-black py-3 hover:brightness-110 transition-all uppercase text-sm mt-4" style={{ backgroundColor: themeColor } as CSSProperties}>
+            <input type="password" className="w-full bg-transparent border-b p-2 outline-none transition-all text-sm" style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURITY_KEY" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <button onClick={handleAuth} className="w-full text-black font-black py-3 uppercase text-sm mt-4 transition-all hover:brightness-125" style={{ backgroundColor: themeColor } as CSSProperties}>
               {isRegistering ? "Register_Identity" : "Establish_Link"}
             </button>
-            <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[9px] text-zinc-600 hover:brightness-125 uppercase tracking-widest mt-2">
+            <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[9px] text-zinc-600 hover:text-white uppercase tracking-widest mt-2">
               {isRegistering ? "Back to Login" : "No Identity? Request Entry"}
             </button>
           </div>
@@ -210,7 +206,7 @@ export default function Home() {
           <div className="hidden md:flex flex-col border-r border-zinc-900 bg-[#080808] p-6 justify-between overflow-hidden">
             <div>
               <div className="mb-10">
-                <h2 className="text-xl font-black tracking-tighter italic text-white uppercase">019_System</h2>
+                <h2 className="text-xl font-black tracking-tighter italic text-white uppercase leading-none">019_System</h2>
                 <div className="flex items-center gap-2 mt-2">
                   <span className="w-2 h-2 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor } as CSSProperties}></span>
                   <span className="text-[10px] tracking-widest uppercase font-bold opacity-70">Terminal_Active</span>
@@ -242,16 +238,16 @@ export default function Home() {
             </button>
           </div>
 
-          {/* MAIN VIEW AREA */}
+          {/* CHAT AREA */}
           <div className="flex flex-col h-full bg-[#0a0a0a] relative overflow-hidden">
             
-            {/* TOP HEADER (Restore Purge Button & Mobile View) */}
-            <div className="p-4 border-b border-zinc-900 flex justify-between items-center bg-black/50 z-10 h-16">
+            {/* TOP HEADER (Restore Purge Button) */}
+            <div className="p-4 border-b border-zinc-900 flex justify-between items-center bg-black/50 z-10 h-14">
               <div className="md:hidden flex flex-col">
-                <span className="text-xs font-black text-white uppercase">{username}</span>
+                <span className="text-xs font-black text-white uppercase leading-tight">{username}</span>
                 <span className="text-[10px] text-yellow-500">{coins.toFixed(2)} ⌬</span>
               </div>
-              <div className="hidden md:block text-[10px] uppercase font-bold opacity-40 italic">Secure_Protocol_Handshake_Active</div>
+              <div className="hidden md:block text-[9px] uppercase font-bold opacity-30 italic tracking-[0.2em]">Protocol_Established // Secure_Handshake</div>
               
               {/* RESTORED PURGE BUTTON */}
               {(username === 'iloveshirin' || localStorage.getItem("019_role") === 'admin') && (
@@ -263,26 +259,23 @@ export default function Home() {
                 </button>
               )}
             </div>
-            
+
             {showShop ? (
-              <div className="flex-1 overflow-y-auto p-8 scrollbar-hide animate-in fade-in zoom-in-95 duration-300">
+              /* --- STORE VIEW --- */
+              <div className="flex-1 overflow-y-auto p-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="mb-8">
-                  <h2 className="text-2xl font-black italic tracking-tighter uppercase text-white">Theme_Extension_Store</h2>
-                  <p className="text-[10px] text-zinc-500 tracking-widest mt-1 uppercase">EXCHANGE CREDITS FOR PROTOCOL VISUALS</p>
+                  <h2 className="text-2xl font-black italic tracking-tighter uppercase text-white">Extension_Store</h2>
+                  <p className="text-[10px] text-zinc-500 tracking-widest mt-1 uppercase">Exchange credits for visual modules</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-10">
                   {THEMES.map((t) => (
                     <div key={t.id} className="border border-zinc-800 p-6 bg-black flex flex-col justify-between hover:border-zinc-600 transition-all">
                       <div>
                         <h3 className="font-black text-lg italic uppercase" style={{ color: t.color } as CSSProperties}>{t.name}</h3>
-                        <p className="text-[10px] text-zinc-500 mt-1 uppercase">COST: {t.cost.toFixed(2)} ⌬</p>
+                        <p className="text-[9px] text-zinc-500 mt-1 uppercase tracking-tighter">Required: {t.cost.toFixed(2)} ⌬</p>
                       </div>
-                      
                       {unlockedThemes.includes(t.id) ? (
-                        <button 
-                          onClick={() => setActiveTheme(t.id)}
-                          className="mt-6 text-[10px] font-black py-2 border border-zinc-700 hover:bg-white hover:text-black transition-all uppercase"
-                        >
+                        <button onClick={() => setActiveTheme(t.id)} className="mt-6 text-[10px] font-black py-2 border border-zinc-700 hover:bg-white hover:text-black transition-all uppercase">
                           {activeTheme === t.id ? "ACTIVE_MODULE" : "EQUIP_MODULE"}
                         </button>
                       ) : (
@@ -291,7 +284,7 @@ export default function Home() {
                           disabled={coins < t.cost}
                           className={`mt-6 text-[10px] font-black py-2 border transition-all uppercase ${coins >= t.cost ? "border-yellow-600 text-yellow-600 hover:bg-yellow-600 hover:text-black" : "border-zinc-900 text-zinc-800 cursor-not-allowed"}`}
                         >
-                          {coins >= t.cost ? "BUY_ACCESS" : "INSUFFICIENT_CREDITS"}
+                          {coins >= t.cost ? "PURCHASE" : "LOCKED"}
                         </button>
                       )}
                     </div>
@@ -299,7 +292,7 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              /* Messages Area - FIXED SCROLLING */
+              /* --- CHAT VIEW (SCROLL FIXED) --- */
               <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800">
                 {chat.map((msg, index) => {
                   const isMe = msg.sender === username;
@@ -309,22 +302,12 @@ export default function Home() {
                         <span className={`text-[9px] text-zinc-600 uppercase mb-1.5 block font-bold tracking-tight ${isMe ? "text-right" : "text-left"}`}>
                           {msg.sender}
                         </span>
-                        
-                        <div className={`p-4 rounded-sm transition-all relative ${
-                          isMe 
-                          ? "bg-white/5 text-white" 
-                          : "bg-white/5 border-zinc-700 text-zinc-300"
-                        }`} style={{ borderRightWidth: isMe ? '2px' : '0px', borderLeftWidth: isMe ? '0px' : '2px', borderColor: isMe ? themeColor : '#3f3f46' } as CSSProperties}>
-                          {msg.text && <p className="text-sm leading-relaxed antialiased font-medium">{msg.text}</p>}
+                        <div className={`p-4 rounded-sm transition-all relative bg-white/5 border-zinc-700 text-zinc-300`} 
+                             style={{ borderRightWidth: isMe ? '2px' : '0px', borderLeftWidth: isMe ? '0px' : '2px', borderColor: isMe ? themeColor : '#3f3f46' } as CSSProperties}>
+                          {msg.text && <p className="text-sm leading-relaxed font-medium antialiased">{msg.text}</p>}
                           {msg.gif && <img src={msg.gif} alt="gif" className="rounded-sm mt-3 w-full max-w-[280px] opacity-90 border border-white/10" />}
-                          
                           {(isMe || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
-                              <button 
-                                  onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
-                                  className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity font-bold"
-                              >
-                                  DEL
-                              </button>
+                              <button onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })} className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity font-bold">DEL</button>
                           )}
                         </div>
                       </div>
@@ -339,25 +322,21 @@ export default function Home() {
             {!showShop && (
               <div className="p-4 bg-black/80 backdrop-blur-xl border-t border-zinc-900 mt-auto">
                 {showGifs && (
-                  <div className="mb-4 bg-[#0d0d0d] border border-zinc-800 p-4 rounded-sm shadow-2xl overflow-hidden">
-                    <div className="flex gap-2 mb-4">
-                        <input className="flex-1 bg-black border border-zinc-800 p-2.5 text-xs outline-none focus:brightness-125 transition-all" style={{ color: themeColor, borderColor: themeColor } as CSSProperties} placeholder="Search Giphy..." value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs()} />
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 h-48 overflow-y-auto pr-2">
+                  <div className="mb-4 bg-[#0d0d0d] border border-zinc-800 p-4 rounded-sm shadow-2xl">
+                    <input className="w-full bg-black border border-zinc-800 p-2.5 text-xs outline-none transition-all mb-4" 
+                           style={{ color: themeColor, borderColor: themeColor } as CSSProperties} 
+                           placeholder="Search Giphy..." value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} 
+                           onKeyDown={(e) => e.key === 'Enter' && searchGifs()} />
+                    <div className="grid grid-cols-3 gap-2 h-40 overflow-y-auto">
                         {gifs.map((g) => (
-                          <img key={g.id} src={g.images.fixed_height_small.url} className="w-full h-24 object-cover cursor-pointer hover:scale-95 transition-transform rounded-sm border border-transparent hover:border-white" onClick={() => sendGif(g.images.fixed_height.url)} />
+                          <img key={g.id} src={g.images.fixed_height_small.url} className="w-full h-24 object-cover cursor-pointer hover:scale-95 transition-transform border border-transparent hover:border-white" onClick={() => sendGif(g.images.fixed_height.url)} />
                         ))}
                     </div>
                   </div>
                 )}
 
                 <form onSubmit={sendMessage} className="flex gap-3 items-center">
-                  <button 
-                    type="button" 
-                    onClick={() => setShowGifs(!showGifs)} 
-                    className={`px-4 py-3 text-[10px] font-black border transition-all ${showGifs ? "text-black" : "text-zinc-500"}`} 
-                    style={{ backgroundColor: showGifs ? themeColor : 'transparent', borderColor: showGifs ? themeColor : '#27272a' } as CSSProperties}
-                  >
+                  <button type="button" onClick={() => setShowGifs(!showGifs)} className={`px-4 py-3 text-[10px] font-black border transition-all ${showGifs ? "text-black" : "text-zinc-500"}`} style={{ backgroundColor: showGifs ? themeColor : 'transparent', borderColor: showGifs ? themeColor : '#27272a' } as CSSProperties}>
                     GIF
                   </button>
                   <input 
@@ -365,15 +344,11 @@ export default function Home() {
                     className="flex-1 bg-[#0f0f0f] border border-zinc-800 p-3 text-sm focus:outline-none transition-all text-white placeholder-zinc-800" 
                     onFocus={(e) => e.target.style.borderColor = themeColor}
                     onBlur={(e) => e.target.style.borderColor = '#27272a'}
-                    placeholder="Type transmission..." 
+                    placeholder="Awaiting input..." 
                     value={message} 
                     onChange={(e) => setMessage(e.target.value)} 
                   />
-                  <button 
-                    type="submit" 
-                    className="px-8 py-3 font-black text-[10px] hover:brightness-110 transition-all uppercase tracking-widest text-black" 
-                    style={{ backgroundColor: themeColor } as CSSProperties}
-                  >
+                  <button type="submit" className="px-8 py-3 font-black text-[10px] transition-all uppercase tracking-widest text-black" style={{ backgroundColor: themeColor } as CSSProperties}>
                     Execute
                   </button>
                 </form>

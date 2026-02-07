@@ -23,7 +23,7 @@ app.post('/api/register', async (req, res) => {
     try {
         const { username, password } = req.body;
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = new User({ username, password: hashedPassword, role: 'user' });
+        const newUser = new User({ username, password: hashedPassword, role: 'user', coins: 0 });
         await newUser.save();
         res.status(201).json({ message: "User Created" });
     } catch (err) {
@@ -45,7 +45,10 @@ app.post('/api/login', async (req, res) => {
         res.json({ 
             token, 
             username: user.username,
-            role: user.role 
+            role: user.role,
+            coins: user.coins || 0,
+            activeTheme: user.activeTheme || 'default',
+            unlockedThemes: user.unlockedThemes || ['default']
         });
     } catch (err) {
         console.error("LOGIN_ERR:", err);
@@ -73,59 +76,49 @@ io.on('connection', (socket) => {
         socket.emit('load_messages', messages);
     });
 
-    // --- UPDATED SEND_MESSAGE FOR GIFs ---
+    // 1. MESSAGE & COIN LOGIC
     socket.on('send_message', async (data) => {
         try {
             const newMessage = new Message({ 
                 sender: data.user, 
                 text: data.text || "", 
-                gif: data.gif || "" // Added GIF support here
+                gif: data.gif || "" 
             });
             const savedMessage = await newMessage.save();
 
-            // --- COIN LOGIC ---
-            // Find the sender and increment their coins by 0.01
             const updatedUser = await User.findOneAndUpdate(
                 { username: data.user },
                 { $inc: { coins: 0.01 } },
-                { new: true } // Returns the updated document
+                { new: true }
             );
 
             io.emit('receive_message', savedMessage); 
-
-            // Send updated coin balance ONLY to the person who sent the message
-            socket.emit('coin_update', updatedUser.coins);
-
+            if (updatedUser) {
+                socket.emit('coin_update', updatedUser.coins);
+            }
         } catch (err) {
             console.error("SEND_ERROR:", err);
         }
     });
 
-    // --- DELETE LOGIC ---
+    // 2. DELETE LOGIC
     socket.on('delete_message', async (data) => {
         try {
             const { messageId, username } = data;
             const message = await Message.findById(messageId);
             const user = await User.findOne({ username });
-
             if (!message || !user) return;
 
-            const isOwner = message.sender === username;
-            const isAdmin = user.role === 'admin' || username === 'iloveshirin';
-
-            if (isOwner || isAdmin) {
+            if (message.sender === username || user.role === 'admin' || username === 'iloveshirin') {
                 await Message.findByIdAndDelete(messageId);
                 io.emit('message_deleted', messageId);
-                console.log(`SUCCESS: Deleted by ${username}`);
-            } else {
-                console.log(`DENIED: ${username} attempted deletion`);
             }
         } catch (err) {
             console.error("DELETE_ERROR:", err);
         }
     });
 
-    // --- PURGE LOGIC ---
+    // 3. PURGE LOGIC
     socket.on('clear_all_messages', async (username) => {
         try {
             const user = await User.findOne({ username });
@@ -139,47 +132,45 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- THEME LOGIC ---
+    // 4. THEME PURCHASE LOGIC
     socket.on('purchase_theme', async ({ username, themeId, cost }) => {
-    try {
-        const user = await User.findOne({ username });
-        if (user.coins >= cost && !user.unlockedThemes.includes(themeId)) {
-            user.coins -= cost;
-            user.unlockedThemes.push(themeId);
-            user.activeTheme = themeId;
-            await user.save();
-            
-            // Send updates back to the user
-            socket.emit('coin_update', user.coins);
-            socket.emit('theme_unlocked', { 
-                unlocked: user.unlockedThemes, 
-                active: user.activeTheme 
-            });
+        try {
+            const user = await User.findOne({ username });
+            if (user && user.coins >= cost && !user.unlockedThemes.includes(themeId)) {
+                user.coins -= cost;
+                user.unlockedThemes.push(themeId);
+                user.activeTheme = themeId;
+                await user.save();
+                
+                socket.emit('coin_update', user.coins);
+                socket.emit('theme_unlocked', { 
+                    unlocked: user.unlockedThemes, 
+                    active: user.activeTheme 
+                });
+            }
+        } catch (err) {
+            console.error("PURCHASE_ERR:", err);
         }
-    } catch (err) {
-        console.error("PURCHASE_ERR:", err);
-    }
+    });
 
-    //admin coin command
+    // 5. ADMIN COIN COMMAND
     socket.on('admin_grant_coins', async ({ username }) => {
-    try {
-        // Security check: Only allow specific users
-        if (username === 'iloveshirin') {
-            const updatedUser = await User.findOneAndUpdate(
-                { username },
-                { $inc: { coins: 100 } },
-                { new: true }
-            );
-            socket.emit('coin_update', updatedUser.coins);
-            console.log(`ADMIN_GRANT: 100 coins added to ${username}`);
+        try {
+            if (username === 'iloveshirin') {
+                const updatedUser = await User.findOneAndUpdate(
+                    { username },
+                    { $inc: { coins: 100 } },
+                    { new: true }
+                );
+                if (updatedUser) {
+                    socket.emit('coin_update', updatedUser.coins);
+                    console.log(`ADMIN_GRANT: 100 coins added to ${username}`);
+                }
+            }
+        } catch (err) {
+            console.error("GRANT_ERROR:", err);
         }
-    } catch (err) {
-        console.error("GRANT_ERROR:", err);
-    }
-});
-
-});
-
+    });
 });
 
 const PORT = process.env.PORT || 10000;
