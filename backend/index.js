@@ -82,7 +82,20 @@ io.on('connection', (socket) => {
                 gif: data.gif || "" // Added GIF support here
             });
             const savedMessage = await newMessage.save();
+
+            // --- COIN LOGIC ---
+            // Find the sender and increment their coins by 0.01
+            const updatedUser = await User.findOneAndUpdate(
+                { username: data.user },
+                { $inc: { coins: 0.01 } },
+                { new: true } // Returns the updated document
+            );
+
             io.emit('receive_message', savedMessage); 
+
+            // Send updated coin balance ONLY to the person who sent the message
+            socket.emit('coin_update', updatedUser.coins);
+
         } catch (err) {
             console.error("SEND_ERROR:", err);
         }

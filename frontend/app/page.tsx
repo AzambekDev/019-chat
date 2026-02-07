@@ -22,6 +22,9 @@ export default function Home() {
   const [chat, setChat] = useState<Message[]>([]);
   const [mounted, setMounted] = useState<boolean>(false);
   
+  // --- NEW: COIN STATE ---
+  const [coins, setCoins] = useState<number>(0);
+  
   // --- GIPHY STATES ---
   const [showGifs, setShowGifs] = useState<boolean>(false);
   const [gifSearch, setGifSearch] = useState<string>("");
@@ -48,12 +51,15 @@ export default function Home() {
     });
 
     socket.on("receive_message", (data: Message) => {
-      console.log("019_INCOMING_TRANSMISSION:", data);
       setChat((prev) => {
-        // Prevent duplicate messages if already in state
         const exists = prev.some(m => m._id === data._id && data._id !== undefined);
         return exists ? prev : [...prev, data];
       });
+    });
+
+    // --- NEW: COIN UPDATE LISTENER ---
+    socket.on("coin_update", (newBalance: number) => {
+      setCoins(newBalance);
     });
 
     socket.on("message_deleted", (id: string) => {
@@ -67,12 +73,12 @@ export default function Home() {
     return () => {
       socket.off("load_messages");
       socket.off("receive_message");
+      socket.off("coin_update");
       socket.off("message_deleted");
       socket.off("chat_cleared");
     };
   }, []);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
@@ -98,6 +104,10 @@ export default function Home() {
           localStorage.setItem("019_token", data.token);
           localStorage.setItem("019_operator_name", data.username);
           localStorage.setItem("019_role", data.role);
+          
+          // SET INITIAL COINS FROM LOGIN DATA
+          setCoins(data.coins || 0);
+          
           setIsLoggedIn(true);
           socket.connect();
         }
@@ -144,23 +154,11 @@ export default function Home() {
 
   const sendGif = (url: string) => {
     if (!url) return;
+    if (!socket.connected) socket.connect();
 
-    // PRECAUTION: Verify connection before emitting
-    if (!socket.connected) {
-      console.warn("SOCKET_OFFLINE: RECONNECTING...");
-      socket.connect();
-    }
-
-    const payload = { 
-      user: username, 
-      text: "", 
-      gif: url 
-    };
-
-    console.log("019_DISPATCHING_GIF_PAYLOAD:", payload);
+    const payload = { user: username, text: "", gif: url };
     socket.emit("send_message", payload);
 
-    // UI State Reset
     setShowGifs(false);
     setGifSearch("");
     setGifs([]);
@@ -171,7 +169,6 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-black text-green-500 font-mono p-4 flex flex-col items-center justify-center">
       {!isLoggedIn ? (
-        /* --- AUTH SCREEN --- */
         <div className="border border-green-900 p-8 bg-zinc-950 rounded-lg shadow-2xl w-full max-w-md">
           <h1 className="text-2xl mb-2 tracking-tighter uppercase font-bold text-center">
             {isRegistering ? "Register_New_Operator" : "Protocol_019 // Auth"}
@@ -201,14 +198,21 @@ export default function Home() {
           </div>
         </div>
       ) : (
-        /* --- CHAT INTERFACE --- */
         <div className="w-full max-w-2xl h-[85vh] border border-zinc-800 bg-zinc-950 flex flex-col rounded-lg overflow-hidden shadow-2xl">
           {/* Header */}
           <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-black/50">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-xs uppercase tracking-widest">System_Online // {username}</span>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-xs uppercase tracking-widest font-bold">System_Online // {username}</span>
+              </div>
+              {/* NEW: COIN DISPLAY */}
+              <div className="text-[10px] text-yellow-500 mt-1 flex items-center gap-1">
+                <span className="opacity-50">CREDITS:</span>
+                <span className="font-bold tracking-widest">{coins.toFixed(2)} ⌬</span>
+              </div>
             </div>
+            
             <div className="flex gap-2">
               {(username === 'iloveshirin' || localStorage.getItem("019_role") === 'admin') && (
                 <button 
@@ -224,7 +228,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {chat.map((msg, index) => (
               <div key={msg._id || index} className={`flex flex-col ${msg.sender === username ? "items-end" : "items-start"}`}>
@@ -257,12 +260,11 @@ export default function Home() {
             <div ref={scrollRef} />
           </div>
 
-          {/* GIF Picker Overlay */}
           {showGifs && (
             <div className="mx-4 mb-2 p-3 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl max-h-60 overflow-y-auto">
                <div className="flex gap-2 mb-3">
                   <input 
-                    className="flex-1 bg-black border border-zinc-700 p-2 text-xs text-green-500 focus:outline-none focus:border-green-500"
+                    className="flex-1 bg-black border border-zinc-700 p-2 text-xs text-green-500 focus:outline-none"
                     placeholder="SEARCH_GIPHY..."
                     value={gifSearch}
                     onChange={(e) => setGifSearch(e.target.value)}
@@ -283,11 +285,10 @@ export default function Home() {
             </div>
           )}
 
-          {/* Input Area */}
           <form onSubmit={sendMessage} className="p-4 border-t border-zinc-800 bg-black/50 flex gap-2 items-center">
             <button 
-              type="button"
-              onClick={() => setShowGifs(!showGifs)}
+              type="button" 
+              onClick={() => setShowGifs(!showGifs)} 
               className={`px-3 py-2 border text-[10px] transition-all font-bold ${showGifs ? "bg-green-900 text-black border-green-400" : "bg-zinc-900 text-green-700 border-zinc-700 hover:text-green-500"}`}
             >
               GIF
