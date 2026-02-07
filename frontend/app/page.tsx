@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, CSSProperties } from "react";
 import { socket } from "@/lib/socket";
 
 // --- TYPESCRIPT INTERFACES ---
@@ -12,6 +12,22 @@ interface Message {
   id?: string;
 }
 
+interface Theme {
+  id: string;
+  name: string;
+  cost: number;
+  color: string;
+  bg?: string;
+}
+
+// --- THEME DATA ---
+const THEMES: Theme[] = [
+  { id: 'default', name: 'MATRIX_GREEN', cost: 0, color: '#22c55e' },
+  { id: 'blood', name: 'BLOOD_PROTOCOL', cost: 5.0, color: '#ef4444' },
+  { id: 'cobalt', name: 'COBALT_STRIKE', cost: 10.0, color: '#3b82f6' },
+  { id: 'gold', name: 'ELITE_GOLD', cost: 50.0, color: '#eab308' },
+];
+
 export default function Home() {
   // --- STATES ---
   const [username, setUsername] = useState<string>("");
@@ -22,11 +38,21 @@ export default function Home() {
   const [chat, setChat] = useState<Message[]>([]);
   const [mounted, setMounted] = useState<boolean>(false);
   const [coins, setCoins] = useState<number>(0);
+  
+  // --- STORE & THEME STATES ---
+  const [showShop, setShowShop] = useState<boolean>(false);
+  const [activeTheme, setActiveTheme] = useState<string>('default');
+  const [unlockedThemes, setUnlockedThemes] = useState<string[]>(['default']);
+  
+  // --- GIPHY STATES ---
   const [showGifs, setShowGifs] = useState<boolean>(false);
   const [gifSearch, setGifSearch] = useState<string>("");
   const [gifs, setGifs] = useState<any[]>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Dynamic Theme Color Finder
+  const themeColor = THEMES.find(t => t.id === activeTheme)?.color || '#22c55e';
 
   // --- 1. PERSISTENCE & SOCKET SETUP ---
   useEffect(() => {
@@ -48,6 +74,12 @@ export default function Home() {
       });
     });
     socket.on("coin_update", (newBalance: number) => setCoins(newBalance));
+    
+    socket.on("theme_unlocked", (data: { unlocked: string[], active: string }) => {
+      setUnlockedThemes(data.unlocked);
+      setActiveTheme(data.active);
+    });
+
     socket.on("message_deleted", (id: string) => {
       setChat((prev) => prev.filter((msg) => (msg._id || msg.id) !== id));
     });
@@ -57,6 +89,7 @@ export default function Home() {
       socket.off("load_messages");
       socket.off("receive_message");
       socket.off("coin_update");
+      socket.off("theme_unlocked");
       socket.off("message_deleted");
       socket.off("chat_cleared");
     };
@@ -64,7 +97,7 @@ export default function Home() {
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chat]);
+  }, [chat, showShop]);
 
   // --- 2. AUTH FUNCTIONS ---
   const handleAuth = async () => {
@@ -86,6 +119,8 @@ export default function Home() {
           localStorage.setItem("019_operator_name", data.username);
           localStorage.setItem("019_role", data.role);
           setCoins(data.coins || 0);
+          setUnlockedThemes(data.unlockedThemes || ['default']);
+          setActiveTheme(data.activeTheme || 'default');
           setIsLoggedIn(true);
           socket.connect();
         }
@@ -130,24 +165,48 @@ export default function Home() {
     setGifs([]);
   };
 
+  const handlePurchase = (themeId: string, cost: number) => {
+    socket.emit('purchase_theme', { username, themeId, cost });
+  };
+
   if (!mounted) return null;
 
   return (
-    <main className="min-h-screen bg-[#050505] text-green-500 font-mono flex items-center justify-center p-2 sm:p-4">
+    <main className="min-h-screen bg-[#050505] flex items-center justify-center p-2 sm:p-4" style={{ color: themeColor } as CSSProperties}>
       {!isLoggedIn ? (
         /* --- AUTH SCREEN --- */
-        <div className="w-full max-w-sm border border-green-900 bg-black p-8 rounded-sm shadow-[0_0_40px_rgba(0,255,0,0.05)]">
+        <div className="w-full max-w-sm border bg-black p-8 rounded-sm shadow-[0_0_40px_rgba(0,255,0,0.05)]" style={{ borderColor: themeColor } as CSSProperties}>
           <div className="text-center mb-8">
             <h1 className="text-3xl font-black italic tracking-tighter uppercase">Protocol_019</h1>
-            <p className="text-[9px] tracking-[0.4em] text-green-900 uppercase mt-1">Encrypted_Access_Only</p>
+            <p className="text-[9px] tracking-[0.4em] uppercase mt-1 opacity-50">Encrypted_Access_Only</p>
           </div>
           <div className="space-y-4">
-            <input className="w-full bg-transparent border-b border-green-900 p-2 focus:border-green-500 outline-none transition-all text-sm" placeholder="OPERATOR_ID" value={username} onChange={(e) => setUsername(e.target.value)} />
-            <input type="password" className="w-full bg-transparent border-b border-green-900 p-2 focus:border-green-500 outline-none transition-all text-sm" placeholder="SECURITY_KEY" value={password} onChange={(e) => setPassword(e.target.value)} />
-            <button onClick={handleAuth} className="w-full bg-green-500 text-black font-black py-3 hover:bg-green-400 transition-all uppercase text-sm mt-4 shadow-[0_0_15px_rgba(0,255,0,0.2)]">
+            <input 
+              className="w-full bg-transparent border-b p-2 outline-none transition-all text-sm" 
+              style={{ borderColor: themeColor } as CSSProperties} 
+              placeholder="OPERATOR_ID" 
+              value={username} 
+              onChange={(e) => setUsername(e.target.value)} 
+            />
+            <input 
+              type="password" 
+              className="w-full bg-transparent border-b p-2 outline-none transition-all text-sm" 
+              style={{ borderColor: themeColor } as CSSProperties} 
+              placeholder="SECURITY_KEY" 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)} 
+            />
+            <button 
+              onClick={handleAuth} 
+              className="w-full text-black font-black py-3 hover:brightness-110 transition-all uppercase text-sm mt-4" 
+              style={{ backgroundColor: themeColor } as CSSProperties}
+            >
               {isRegistering ? "Register_Identity" : "Establish_Link"}
             </button>
-            <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[9px] text-zinc-600 hover:text-green-700 uppercase tracking-widest mt-2">
+            <button 
+              onClick={() => setIsRegistering(!isRegistering)} 
+              className="w-full text-[9px] text-zinc-600 hover:brightness-125 uppercase tracking-widest mt-2"
+            >
               {isRegistering ? "Back to Login" : "No Identity? Request Entry"}
             </button>
           </div>
@@ -160,23 +219,31 @@ export default function Home() {
           <div className="hidden md:flex flex-col border-r border-zinc-900 bg-[#080808] p-6 justify-between">
             <div>
               <div className="mb-10">
-                <h2 className="text-xl font-black tracking-tighter italic text-white">019_PROTOCOL</h2>
+                <h2 className="text-xl font-black tracking-tighter italic text-white uppercase">019_System</h2>
                 <div className="flex items-center gap-2 mt-2">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_green]"></span>
-                  <span className="text-[10px] text-green-800 tracking-widest uppercase font-bold">Terminal_Active</span>
+                  <span className="w-2 h-2 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor } as CSSProperties}></span>
+                  <span className="text-[10px] tracking-widest uppercase font-bold opacity-70">Terminal_Active</span>
                 </div>
               </div>
 
               <div className="space-y-8">
                 <div>
                   <p className="text-[9px] text-zinc-600 mb-1 uppercase tracking-widest font-bold">Operator</p>
-                  <p className="text-sm text-white font-black truncate border-l-2 border-green-600 pl-2">{username}</p>
+                  <p className="text-sm text-white font-black truncate border-l-2 pl-2" style={{ borderColor: themeColor } as CSSProperties}>{username}</p>
                 </div>
                 <div>
-                  <p className="text-[9px] text-zinc-600 mb-1 uppercase tracking-widest font-bold">Network_Balance</p>
+                  <p className="text-[9px] text-zinc-600 mb-1 uppercase tracking-widest font-bold">Credits</p>
                   <p className="text-2xl text-yellow-500 font-black tracking-tighter leading-none">{coins.toFixed(2)} <span className="text-xs ml-1">⌬</span></p>
                 </div>
               </div>
+
+              <button 
+                onClick={() => setShowShop(!showShop)}
+                className="mt-12 w-full text-left text-[10px] font-black tracking-widest uppercase hover:brightness-150 transition-all"
+                style={{ color: showShop ? '#fff' : themeColor } as CSSProperties}
+              >
+                {showShop ? '[ CLOSE_TERMINAL ]' : '[ ACCESS_STORE ]'}
+              </button>
             </div>
 
             <button onClick={handleLogout} className="text-left text-[10px] text-red-900 hover:text-red-500 transition-all uppercase font-black tracking-widest">
@@ -184,83 +251,132 @@ export default function Home() {
             </button>
           </div>
 
-          {/* CHAT AREA */}
           <div className="flex flex-col h-full bg-[#0a0a0a] relative">
-            {/* Header Mobile Only */}
-            <div className="md:hidden p-4 border-b border-zinc-900 flex justify-between items-center bg-black">
-                <span className="text-xs font-black text-white uppercase">{username}</span>
-                <span className="text-xs text-yellow-500 font-black">{coins.toFixed(2)} ⌬</span>
-            </div>
-
-            {/* Messages Pane */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800">
-              {chat.map((msg, index) => {
-                const isMe = msg.sender === username;
-                return (
-                  <div key={msg._id || index} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                    <div className="max-w-[85%] sm:max-w-[70%] group relative">
-                      <span className={`text-[9px] text-zinc-600 uppercase mb-1.5 block font-bold tracking-tight ${isMe ? "text-right" : "text-left"}`}>
-                        {msg.sender}
-                      </span>
-                      
-                      <div className={`p-4 rounded-sm transition-all relative ${
-                        isMe 
-                        ? "bg-green-500/5 border-r-2 border-green-500 text-green-100" 
-                        : "bg-white/5 border-l-2 border-zinc-700 text-zinc-300"
-                      }`}>
-                        {msg.text && <p className="text-sm leading-relaxed antialiased font-medium">{msg.text}</p>}
-                        {msg.gif && <img src={msg.gif} alt="gif" className="rounded-sm mt-3 w-full max-w-[280px] opacity-90 border border-white/10" />}
-                        
-                        {(isMe || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
-                            <button 
-                                onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
-                                className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity font-bold"
-                            >
-                                DEL
-                            </button>
-                        )}
+            
+            {showShop ? (
+              <div className="flex-1 overflow-y-auto p-8 scrollbar-hide animate-in fade-in zoom-in-95 duration-300">
+                <div className="mb-8">
+                  <h2 className="text-2xl font-black italic tracking-tighter uppercase text-white">Theme_Extension_Store</h2>
+                  <p className="text-[10px] text-zinc-500 tracking-widest mt-1 uppercase">EXCHANGE CREDITS FOR PROTOCOL VISUALS</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {THEMES.map((t) => (
+                    <div key={t.id} className="border border-zinc-800 p-6 bg-black flex flex-col justify-between hover:border-zinc-600 transition-all">
+                      <div>
+                        <h3 className="font-black text-lg italic uppercase" style={{ color: t.color } as CSSProperties}>{t.name}</h3>
+                        <p className="text-[10px] text-zinc-500 mt-1 uppercase">COST: {t.cost.toFixed(2)} ⌬</p>
                       </div>
+                      
+                      {unlockedThemes.includes(t.id) ? (
+                        <button 
+                          onClick={() => setActiveTheme(t.id)}
+                          className="mt-6 text-[10px] font-black py-2 border border-zinc-700 hover:bg-white hover:text-black transition-all uppercase"
+                        >
+                          {activeTheme === t.id ? "ACTIVE_MODULE" : "EQUIP_MODULE"}
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => handlePurchase(t.id, t.cost)}
+                          disabled={coins < t.cost}
+                          className={`mt-6 text-[10px] font-black py-2 border transition-all uppercase ${coins >= t.cost ? "border-yellow-600 text-yellow-600 hover:bg-yellow-600 hover:text-black" : "border-zinc-900 text-zinc-800 cursor-not-allowed"}`}
+                        >
+                          {coins >= t.cost ? "BUY_ACCESS" : "INSUFFICIENT_CREDITS"}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="md:hidden p-4 border-b border-zinc-900 flex justify-between items-center bg-black">
+                  <span className="text-xs font-black text-white uppercase">{username}</span>
+                  <span className="text-xs text-yellow-500 font-black">{coins.toFixed(2)} ⌬</span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800">
+                  {chat.map((msg, index) => {
+                    const isMe = msg.sender === username;
+                    return (
+                      <div key={msg._id || index} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                        <div className="max-w-[85%] sm:max-w-[70%] group relative">
+                          <span className={`text-[9px] text-zinc-600 uppercase mb-1.5 block font-bold tracking-tight ${isMe ? "text-right" : "text-left"}`}>
+                            {msg.sender}
+                          </span>
+                          
+                          <div className={`p-4 rounded-sm transition-all relative ${
+                            isMe 
+                            ? "bg-white/5 text-white" 
+                            : "bg-white/5 border-zinc-700 text-zinc-300"
+                          }`} style={{ borderRightWidth: isMe ? '2px' : '0px', borderLeftWidth: isMe ? '0px' : '2px', borderColor: isMe ? themeColor : '#3f3f46' } as CSSProperties}>
+                            {msg.text && <p className="text-sm leading-relaxed antialiased font-medium">{msg.text}</p>}
+                            {msg.gif && <img src={msg.gif} alt="gif" className="rounded-sm mt-3 w-full max-w-[280px] opacity-90 border border-white/10" />}
+                            
+                            {(isMe || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
+                                <button 
+                                    onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
+                                    className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity font-bold"
+                                >
+                                    DEL
+                                </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={scrollRef} />
+                </div>
+              </>
+            )}
+
+            {!showShop && (
+              <div className="p-4 bg-black/80 backdrop-blur-xl border-t border-zinc-900">
+                {showGifs && (
+                  <div className="mb-4 bg-[#0d0d0d] border border-zinc-800 p-4 rounded-sm shadow-2xl">
+                    <input 
+                      className="w-full bg-black border border-zinc-800 p-2.5 text-xs outline-none transition-all mb-4" 
+                      style={{ color: themeColor, borderColor: themeColor } as CSSProperties} 
+                      placeholder="Search Giphy..." 
+                      value={gifSearch} 
+                      onChange={(e) => setGifSearch(e.target.value)} 
+                      onKeyDown={(e) => e.key === 'Enter' && searchGifs()} 
+                    />
+                    <div className="grid grid-cols-3 gap-2 h-48 overflow-y-auto">
+                        {gifs.map((g) => (
+                          <img key={g.id} src={g.images.fixed_height_small.url} className="w-full h-24 object-cover cursor-pointer hover:scale-95 transition-transform rounded-sm border border-transparent hover:border-white" onClick={() => sendGif(g.images.fixed_height.url)} />
+                        ))}
                     </div>
                   </div>
-                );
-              })}
-              <div ref={scrollRef} />
-            </div>
+                )}
 
-            {/* Input & GIF UI */}
-            <div className="p-4 bg-black/80 backdrop-blur-xl border-t border-zinc-900">
-              {showGifs && (
-                <div className="mb-4 bg-[#0d0d0d] border border-zinc-800 p-4 rounded-sm shadow-2xl">
-                   <div className="flex gap-2 mb-4">
-                      <input className="flex-1 bg-black border border-zinc-800 p-2.5 text-xs outline-none focus:border-green-600 text-green-500" placeholder="Search Giphy..." value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs()} />
-                   </div>
-                   <div className="grid grid-cols-3 gap-2 h-48 overflow-y-auto">
-                      {gifs.map((g) => (
-                        <img key={g.id} src={g.images.fixed_height_small.url} className="w-full h-24 object-cover cursor-pointer hover:scale-95 transition-transform rounded-sm border border-transparent hover:border-green-500" onClick={() => sendGif(g.images.fixed_height.url)} />
-                      ))}
-                   </div>
-                </div>
-              )}
-
-              <form onSubmit={sendMessage} className="flex gap-3 items-center">
-                <button type="button" onClick={() => setShowGifs(!showGifs)} className={`px-4 py-3 text-[10px] font-black border transition-all ${showGifs ? "bg-green-500 text-black border-green-500" : "bg-transparent border-zinc-800 text-zinc-500 hover:text-green-500 hover:border-green-500"}`}>
-                  GIF
-                </button>
-                <input type="text" className="flex-1 bg-[#0f0f0f] border border-zinc-800 p-3 text-sm focus:outline-none focus:border-green-900 transition-all text-white placeholder-zinc-800" placeholder="Type transmission..." value={message} onChange={(e) => setMessage(e.target.value)} />
-                <button type="submit" className="bg-zinc-900 border border-zinc-700 px-8 py-3 font-black text-[10px] hover:bg-green-500 hover:text-black hover:border-green-500 transition-all uppercase tracking-widest">
-                  Execute
-                </button>
-              </form>
-            </div>
-
-            {/* Admin Purge Button overlay for iloveshirin (Desktop only) */}
-            {(username === 'iloveshirin' || localStorage.getItem("019_role") === 'admin') && (
-              <button 
-                onClick={() => { if(confirm("PERMANENT_PURGE?")) socket.emit("clear_all_messages", username) }}
-                className="hidden md:block absolute top-4 right-4 text-[8px] text-yellow-900 border border-yellow-900 px-2 py-1 rounded hover:bg-yellow-900 hover:text-black transition-all font-bold uppercase tracking-tighter"
-              >
-                Purge_System
-              </button>
+                <form onSubmit={sendMessage} className="flex gap-3 items-center">
+                  <button 
+                    type="button" 
+                    onClick={() => setShowGifs(!showGifs)} 
+                    className={`px-4 py-3 text-[10px] font-black border transition-all ${showGifs ? "text-black" : "text-zinc-500"}`} 
+                    style={{ backgroundColor: showGifs ? themeColor : 'transparent', borderColor: showGifs ? themeColor : '#27272a' } as CSSProperties}
+                  >
+                    GIF
+                  </button>
+                  <input 
+                    type="text" 
+                    className="flex-1 bg-[#0f0f0f] border border-zinc-800 p-3 text-sm focus:outline-none transition-all text-white placeholder-zinc-800" 
+                    onFocus={(e) => e.target.style.borderColor = themeColor}
+                    onBlur={(e) => e.target.style.borderColor = '#27272a'}
+                    placeholder="Type transmission..." 
+                    value={message} 
+                    onChange={(e) => setMessage(e.target.value)} 
+                  />
+                  <button 
+                    type="submit" 
+                    className="px-8 py-3 font-black text-[10px] hover:brightness-110 transition-all uppercase tracking-widest text-black" 
+                    style={{ backgroundColor: themeColor } as CSSProperties}
+                  >
+                    Execute
+                  </button>
+                </form>
+              </div>
             )}
           </div>
         </div>

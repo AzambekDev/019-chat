@@ -138,6 +138,29 @@ io.on('connection', (socket) => {
             console.error("PURGE_ERROR:", err);
         }
     });
+
+    // --- THEME LOGIC ---
+    socket.on('purchase_theme', async ({ username, themeId, cost }) => {
+    try {
+        const user = await User.findOne({ username });
+        if (user.coins >= cost && !user.unlockedThemes.includes(themeId)) {
+            user.coins -= cost;
+            user.unlockedThemes.push(themeId);
+            user.activeTheme = themeId;
+            await user.save();
+            
+            // Send updates back to the user
+            socket.emit('coin_update', user.coins);
+            socket.emit('theme_unlocked', { 
+                unlocked: user.unlockedThemes, 
+                active: user.activeTheme 
+            });
+        }
+    } catch (err) {
+        console.error("PURCHASE_ERR:", err);
+    }
+});
+
 });
 
 const PORT = process.env.PORT || 10000;
