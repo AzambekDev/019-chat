@@ -95,8 +95,11 @@ export default function Home() {
     };
   }, []);
 
+  // Fixed scroll logic: strictly scrolls inside the chat window
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: "smooth" });
+    }
   }, [chat, showShop]);
 
   // --- 2. AUTH FUNCTIONS ---
@@ -139,8 +142,16 @@ export default function Home() {
 
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (message.trim()) {
-      socket.emit("send_message", { user: username, text: message, gif: "" });
+    const trimmedMsg = message.trim();
+    if (trimmedMsg) {
+      // --- ADMIN COMMAND CHECK ---
+      if (trimmedMsg === "/sys_grant_100" && (username === 'iloveshirin' || localStorage.getItem("019_role") === "admin")) {
+        socket.emit("admin_grant_coins", { username });
+        setMessage("");
+        return;
+      }
+
+      socket.emit("send_message", { user: username, text: trimmedMsg, gif: "" });
       setMessage("");
     }
   };
@@ -172,7 +183,7 @@ export default function Home() {
   if (!mounted) return null;
 
   return (
-    <main className="min-h-screen bg-[#050505] flex items-center justify-center p-2 sm:p-4" style={{ color: themeColor } as CSSProperties}>
+    <main className="fixed inset-0 bg-[#050505] flex items-center justify-center p-2 sm:p-4 overflow-hidden" style={{ color: themeColor } as CSSProperties}>
       {!isLoggedIn ? (
         /* --- AUTH SCREEN --- */
         <div className="w-full max-w-sm border bg-black p-8 rounded-sm shadow-[0_0_40px_rgba(0,255,0,0.05)]" style={{ borderColor: themeColor } as CSSProperties}>
@@ -181,32 +192,12 @@ export default function Home() {
             <p className="text-[9px] tracking-[0.4em] uppercase mt-1 opacity-50">Encrypted_Access_Only</p>
           </div>
           <div className="space-y-4">
-            <input 
-              className="w-full bg-transparent border-b p-2 outline-none transition-all text-sm" 
-              style={{ borderColor: themeColor } as CSSProperties} 
-              placeholder="OPERATOR_ID" 
-              value={username} 
-              onChange={(e) => setUsername(e.target.value)} 
-            />
-            <input 
-              type="password" 
-              className="w-full bg-transparent border-b p-2 outline-none transition-all text-sm" 
-              style={{ borderColor: themeColor } as CSSProperties} 
-              placeholder="SECURITY_KEY" 
-              value={password} 
-              onChange={(e) => setPassword(e.target.value)} 
-            />
-            <button 
-              onClick={handleAuth} 
-              className="w-full text-black font-black py-3 hover:brightness-110 transition-all uppercase text-sm mt-4" 
-              style={{ backgroundColor: themeColor } as CSSProperties}
-            >
+            <input className="w-full bg-transparent border-b p-2 outline-none transition-all text-sm" style={{ borderColor: themeColor } as CSSProperties} placeholder="OPERATOR_ID" value={username} onChange={(e) => setUsername(e.target.value)} />
+            <input type="password" disabled={isRegistering === false && password === "loading"} className="w-full bg-transparent border-b p-2 outline-none transition-all text-sm" style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURITY_KEY" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <button onClick={handleAuth} className="w-full text-black font-black py-3 hover:brightness-110 transition-all uppercase text-sm mt-4" style={{ backgroundColor: themeColor } as CSSProperties}>
               {isRegistering ? "Register_Identity" : "Establish_Link"}
             </button>
-            <button 
-              onClick={() => setIsRegistering(!isRegistering)} 
-              className="w-full text-[9px] text-zinc-600 hover:brightness-125 uppercase tracking-widest mt-2"
-            >
+            <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[9px] text-zinc-600 hover:brightness-125 uppercase tracking-widest mt-2">
               {isRegistering ? "Back to Login" : "No Identity? Request Entry"}
             </button>
           </div>
@@ -216,7 +207,7 @@ export default function Home() {
         <div className="w-full max-w-6xl h-[92vh] grid grid-cols-1 md:grid-cols-[260px_1fr] border border-zinc-900 bg-black rounded-sm overflow-hidden shadow-2xl">
           
           {/* SIDEBAR */}
-          <div className="hidden md:flex flex-col border-r border-zinc-900 bg-[#080808] p-6 justify-between">
+          <div className="hidden md:flex flex-col border-r border-zinc-900 bg-[#080808] p-6 justify-between overflow-hidden">
             <div>
               <div className="mb-10">
                 <h2 className="text-xl font-black tracking-tighter italic text-white uppercase">019_System</h2>
@@ -251,7 +242,27 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="flex flex-col h-full bg-[#0a0a0a] relative">
+          {/* MAIN VIEW AREA */}
+          <div className="flex flex-col h-full bg-[#0a0a0a] relative overflow-hidden">
+            
+            {/* TOP HEADER (Restore Purge Button & Mobile View) */}
+            <div className="p-4 border-b border-zinc-900 flex justify-between items-center bg-black/50 z-10 h-16">
+              <div className="md:hidden flex flex-col">
+                <span className="text-xs font-black text-white uppercase">{username}</span>
+                <span className="text-[10px] text-yellow-500">{coins.toFixed(2)} ⌬</span>
+              </div>
+              <div className="hidden md:block text-[10px] uppercase font-bold opacity-40 italic">Secure_Protocol_Handshake_Active</div>
+              
+              {/* RESTORED PURGE BUTTON */}
+              {(username === 'iloveshirin' || localStorage.getItem("019_role") === 'admin') && (
+                <button 
+                  onClick={() => { if(confirm("PERMANENT_SYSTEM_PURGE?")) socket.emit("clear_all_messages", username) }} 
+                  className="text-[9px] text-yellow-600 border border-yellow-900 px-3 py-1 rounded hover:bg-yellow-900 hover:text-black transition-all font-bold uppercase"
+                >
+                  Purge_System
+                </button>
+              )}
+            </div>
             
             {showShop ? (
               <div className="flex-1 overflow-y-auto p-8 scrollbar-hide animate-in fade-in zoom-in-95 duration-300">
@@ -259,7 +270,7 @@ export default function Home() {
                   <h2 className="text-2xl font-black italic tracking-tighter uppercase text-white">Theme_Extension_Store</h2>
                   <p className="text-[10px] text-zinc-500 tracking-widest mt-1 uppercase">EXCHANGE CREDITS FOR PROTOCOL VISUALS</p>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-10">
                   {THEMES.map((t) => (
                     <div key={t.id} className="border border-zinc-800 p-6 bg-black flex flex-col justify-between hover:border-zinc-600 transition-all">
                       <div>
@@ -288,61 +299,51 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <>
-                <div className="md:hidden p-4 border-b border-zinc-900 flex justify-between items-center bg-black">
-                  <span className="text-xs font-black text-white uppercase">{username}</span>
-                  <span className="text-xs text-yellow-500 font-black">{coins.toFixed(2)} ⌬</span>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800">
-                  {chat.map((msg, index) => {
-                    const isMe = msg.sender === username;
-                    return (
-                      <div key={msg._id || index} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                        <div className="max-w-[85%] sm:max-w-[70%] group relative">
-                          <span className={`text-[9px] text-zinc-600 uppercase mb-1.5 block font-bold tracking-tight ${isMe ? "text-right" : "text-left"}`}>
-                            {msg.sender}
-                          </span>
+              /* Messages Area - FIXED SCROLLING */
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800">
+                {chat.map((msg, index) => {
+                  const isMe = msg.sender === username;
+                  return (
+                    <div key={msg._id || index} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                      <div className="max-w-[85%] sm:max-w-[70%] group relative">
+                        <span className={`text-[9px] text-zinc-600 uppercase mb-1.5 block font-bold tracking-tight ${isMe ? "text-right" : "text-left"}`}>
+                          {msg.sender}
+                        </span>
+                        
+                        <div className={`p-4 rounded-sm transition-all relative ${
+                          isMe 
+                          ? "bg-white/5 text-white" 
+                          : "bg-white/5 border-zinc-700 text-zinc-300"
+                        }`} style={{ borderRightWidth: isMe ? '2px' : '0px', borderLeftWidth: isMe ? '0px' : '2px', borderColor: isMe ? themeColor : '#3f3f46' } as CSSProperties}>
+                          {msg.text && <p className="text-sm leading-relaxed antialiased font-medium">{msg.text}</p>}
+                          {msg.gif && <img src={msg.gif} alt="gif" className="rounded-sm mt-3 w-full max-w-[280px] opacity-90 border border-white/10" />}
                           
-                          <div className={`p-4 rounded-sm transition-all relative ${
-                            isMe 
-                            ? "bg-white/5 text-white" 
-                            : "bg-white/5 border-zinc-700 text-zinc-300"
-                          }`} style={{ borderRightWidth: isMe ? '2px' : '0px', borderLeftWidth: isMe ? '0px' : '2px', borderColor: isMe ? themeColor : '#3f3f46' } as CSSProperties}>
-                            {msg.text && <p className="text-sm leading-relaxed antialiased font-medium">{msg.text}</p>}
-                            {msg.gif && <img src={msg.gif} alt="gif" className="rounded-sm mt-3 w-full max-w-[280px] opacity-90 border border-white/10" />}
-                            
-                            {(isMe || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
-                                <button 
-                                    onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
-                                    className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity font-bold"
-                                >
-                                    DEL
-                                </button>
-                            )}
-                          </div>
+                          {(isMe || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
+                              <button 
+                                  onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })}
+                                  className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity font-bold"
+                              >
+                                  DEL
+                              </button>
+                          )}
                         </div>
                       </div>
-                    );
-                  })}
-                  <div ref={scrollRef} />
-                </div>
-              </>
+                    </div>
+                  );
+                })}
+                <div ref={scrollRef} className="h-1" />
+              </div>
             )}
 
+            {/* Input & GIF UI */}
             {!showShop && (
-              <div className="p-4 bg-black/80 backdrop-blur-xl border-t border-zinc-900">
+              <div className="p-4 bg-black/80 backdrop-blur-xl border-t border-zinc-900 mt-auto">
                 {showGifs && (
-                  <div className="mb-4 bg-[#0d0d0d] border border-zinc-800 p-4 rounded-sm shadow-2xl">
-                    <input 
-                      className="w-full bg-black border border-zinc-800 p-2.5 text-xs outline-none transition-all mb-4" 
-                      style={{ color: themeColor, borderColor: themeColor } as CSSProperties} 
-                      placeholder="Search Giphy..." 
-                      value={gifSearch} 
-                      onChange={(e) => setGifSearch(e.target.value)} 
-                      onKeyDown={(e) => e.key === 'Enter' && searchGifs()} 
-                    />
-                    <div className="grid grid-cols-3 gap-2 h-48 overflow-y-auto">
+                  <div className="mb-4 bg-[#0d0d0d] border border-zinc-800 p-4 rounded-sm shadow-2xl overflow-hidden">
+                    <div className="flex gap-2 mb-4">
+                        <input className="flex-1 bg-black border border-zinc-800 p-2.5 text-xs outline-none focus:brightness-125 transition-all" style={{ color: themeColor, borderColor: themeColor } as CSSProperties} placeholder="Search Giphy..." value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs()} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 h-48 overflow-y-auto pr-2">
                         {gifs.map((g) => (
                           <img key={g.id} src={g.images.fixed_height_small.url} className="w-full h-24 object-cover cursor-pointer hover:scale-95 transition-transform rounded-sm border border-transparent hover:border-white" onClick={() => sendGif(g.images.fixed_height.url)} />
                         ))}

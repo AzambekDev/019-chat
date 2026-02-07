@@ -159,6 +159,25 @@ io.on('connection', (socket) => {
     } catch (err) {
         console.error("PURCHASE_ERR:", err);
     }
+
+    //admin coin command
+    socket.on('admin_grant_coins', async ({ username }) => {
+    try {
+        // Security check: Only allow specific users
+        if (username === 'iloveshirin') {
+            const updatedUser = await User.findOneAndUpdate(
+                { username },
+                { $inc: { coins: 100 } },
+                { new: true }
+            );
+            socket.emit('coin_update', updatedUser.coins);
+            console.log(`ADMIN_GRANT: 100 coins added to ${username}`);
+        }
+    } catch (err) {
+        console.error("GRANT_ERROR:", err);
+    }
+});
+
 });
 
 });
