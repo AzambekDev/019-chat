@@ -33,18 +33,25 @@ const THEMES: Theme[] = [
   { id: 'gold', name: 'ELITE_GOLD', cost: 50.0, color: '#eab308' },
 ];
 
-const CHANNELS = ["global", "dev-ops", "intel", "admin-log"];
+const CHANNELS = ["global", "dev-ops", "intel"];
 
 export default function Home() {
+  // --- CORE STATES ---
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [isRegistering, setIsRegistering] = useState<boolean>(false);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [mounted, setMounted] = useState<boolean>(false);
   const [coins, setCoins] = useState<number>(0);
+  
+  // --- ROOM & NOTIFICATION STATES ---
   const [currentRoom, setCurrentRoom] = useState<string>("global");
+  const [activeDMs, setActiveDMs] = useState<string[]>([]); // Tracks usernames you are currently DMing
+  const [notifications, setNotifications] = useState<Record<string, number>>({}); 
   const [chat, setChat] = useState<Message[]>([]);
   const [message, setMessage] = useState<string>("");
+
+  // --- UI STATES ---
   const [showShop, setShowShop] = useState<boolean>(false);
   const [activeTheme, setActiveTheme] = useState<string>('default');
   const [unlockedThemes, setUnlockedThemes] = useState<string[]>(['default']);
@@ -57,7 +64,7 @@ export default function Home() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const themeColor = THEMES.find(t => t.id === activeTheme)?.color || '#22c55e';
 
-  // --- 1. SOCKET LISTENERS ---
+  // --- 1. SOCKET HANDLERS ---
   useEffect(() => {
     setMounted(true);
     const savedUser = localStorage.getItem("019_operator_name");
@@ -70,11 +77,27 @@ export default function Home() {
     }
 
     socket.on("load_messages", (messages: Message[]) => setChat(messages));
+    
     socket.on("receive_message", (data: Message) => {
       if (data.room === currentRoom || (!data.room && currentRoom === "global")) {
         setChat((prev) => [...prev, data]);
       }
     });
+
+    // --- DM ALERT LISTENER ---
+    socket.on("incoming_dm_alert", (data: { from: string, room: string, text: string }) => {
+      if (currentRoom !== data.room) {
+        // 1. Add sender to active DMs if not there
+        setActiveDMs(prev => prev.includes(data.from) ? prev : [...prev, data.from]);
+        
+        // 2. Increment notification count
+        setNotifications(prev => ({
+          ...prev,
+          [data.room]: (prev[data.room] || 0) + 1
+        }));
+      }
+    });
+
     socket.on("coin_update", (newBalance: number) => setCoins(newBalance));
     socket.on("theme_unlocked", (data: { unlocked: string[], active: string }) => {
       setUnlockedThemes(data.unlocked);
@@ -86,6 +109,7 @@ export default function Home() {
     return () => {
       socket.off("load_messages");
       socket.off("receive_message");
+      socket.off("incoming_dm_alert");
       socket.off("coin_update");
       socket.off("theme_unlocked");
       socket.off("message_deleted");
@@ -93,9 +117,18 @@ export default function Home() {
     };
   }, [currentRoom]);
 
+  // Handle Room Switching & Personal Room Joining
   useEffect(() => {
-    if (isLoggedIn) socket.emit("join_room", currentRoom);
-  }, [currentRoom, isLoggedIn]);
+    if (isLoggedIn) {
+      // Pass both current room and username to backend for handshake
+      socket.emit("join_room", { room: currentRoom, username: username });
+      
+      // Clear notifications for the room we just entered
+      if (notifications[currentRoom]) {
+        setNotifications(prev => ({ ...prev, [currentRoom]: 0 }));
+      }
+    }
+  }, [currentRoom, isLoggedIn, username]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -154,6 +187,7 @@ export default function Home() {
 
   const startPrivateChat = (targetUser: string) => {
     const roomId = [username, targetUser].sort().join("_DM_");
+    setActiveDMs(prev => prev.includes(targetUser) ? prev : [...prev, targetUser]);
     setCurrentRoom(roomId);
     setUserSearch("");
     setSearchResults([]);
@@ -180,7 +214,7 @@ export default function Home() {
       const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${gifSearch}&limit=12&rating=g`);
       const { data } = await res.json();
       setGifs(data);
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error("Giphy Search Failure:", err); }
   };
 
   const sendGif = (url: string) => {
@@ -201,12 +235,15 @@ export default function Home() {
           </div>
           <div className="space-y-4">
             <input className="w-full bg-transparent border-b p-2 outline-none text-sm focus:brightness-150 transition-all" style={{ borderColor: themeColor } as CSSProperties} placeholder="OPERATOR_ID" value={username} onChange={(e) => setUsername(e.target.value)} />
-            <input type="password" className="w-full bg-transparent border-b p-2 outline-none text-sm focus:brightness-150 transition-all" style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURITY_KEY" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <input type="password" 
+                   className="w-full bg-transparent border-b p-2 outline-none text-sm" 
+                   style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURITY_KEY" 
+                   value={password} onChange={(e) => setPassword(e.target.value)} />
             <button onClick={handleAuth} className="w-full text-black font-black py-3 uppercase text-sm mt-4 hover:brightness-110 transition-all" style={{ backgroundColor: themeColor } as CSSProperties}>
-              {isRegistering ? "Register_Identity" : "Establish_Link"}
+                {isRegistering ? "Register_Identity" : "Establish_Link"}
             </button>
             <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[9px] text-zinc-600 hover:text-white uppercase tracking-widest mt-2">
-              {isRegistering ? "Back to Login" : "No Identity? Request Entry"}
+                {isRegistering ? "Back to Login" : "No Identity? Request Entry"}
             </button>
           </div>
         </div>
@@ -246,19 +283,41 @@ export default function Home() {
                 )}
               </div>
 
-              <div className="space-y-1">
-                <p className="text-[9px] text-zinc-600 mb-2 uppercase tracking-widest font-bold">Active_Channels</p>
+              {/* CHANNELS */}
+              <div className="space-y-1 mb-6">
+                <p className="text-[9px] text-zinc-600 mb-2 uppercase tracking-widest font-bold">Channels</p>
                 {CHANNELS.map((ch) => (
                   <button key={ch} onClick={() => { setShowShop(false); setCurrentRoom(ch); }} 
-                          className={`w-full text-left text-[11px] p-2 transition-all uppercase font-bold ${currentRoom === ch && !showShop ? 'bg-white/5 border-l-2' : 'opacity-40 hover:opacity-100 hover:translate-x-1'}`} 
-                          style={{ borderColor: currentRoom === ch && !showShop ? themeColor : 'transparent' }}># {ch}</button>
+                          className={`w-full text-left text-[11px] p-2 transition-all uppercase font-bold flex justify-between items-center ${currentRoom === ch && !showShop ? 'bg-white/5 border-l-2' : 'opacity-40 hover:opacity-100 hover:translate-x-1'}`} 
+                          style={{ borderColor: currentRoom === ch && !showShop ? themeColor : 'transparent' }}>
+                    <span># {ch}</span>
+                    {notifications[ch] > 0 && <span className="bg-red-600 text-white text-[8px] px-1 rounded-full animate-pulse">{notifications[ch]}</span>}
+                  </button>
                 ))}
               </div>
 
+              {/* ACTIVE DMs */}
+              {activeDMs.length > 0 && (
+                <div className="space-y-1 mb-6">
+                  <p className="text-[9px] text-zinc-600 mb-2 uppercase tracking-widest font-bold">Active_DMs</p>
+                  {activeDMs.map((dmUser) => {
+                    const dmRoomId = [username, dmUser].sort().join("_DM_");
+                    return (
+                      <button key={dmUser} onClick={() => { setShowShop(false); setCurrentRoom(dmRoomId); }} 
+                              className={`w-full text-left text-[11px] p-2 transition-all uppercase font-bold flex justify-between items-center ${currentRoom === dmRoomId && !showShop ? 'bg-white/5 border-l-2' : 'opacity-40 hover:opacity-100 hover:translate-x-1'}`} 
+                              style={{ borderColor: currentRoom === dmRoomId && !showShop ? themeColor : 'transparent' }}>
+                        <span>@ {dmUser}</span>
+                        {notifications[dmRoomId] > 0 && <span className="bg-red-600 text-white text-[8px] px-1 rounded-full animate-pulse">{notifications[dmRoomId]}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               <button onClick={() => setShowShop(!showShop)} 
-                      className="mt-12 w-full text-left text-[10px] font-black tracking-widest uppercase hover:text-white transition-all" 
+                      className="mt-4 w-full text-left text-[10px] font-black tracking-widest uppercase hover:text-white transition-all" 
                       style={{ color: showShop ? '#fff' : themeColor } as CSSProperties}>
-                {showShop ? '[ CLOSE_TERMINAL ]' : '[ ACCESS_STORE ]'}
+                {showShop ? '[ CLOSE_STORE ]' : '[ ACCESS_STORE ]'}
               </button>
             </div>
             <button onClick={handleLogout} className="text-left text-[10px] text-red-900 hover:text-red-500 transition-all uppercase font-black tracking-widest">[ Terminate_Session ]</button>

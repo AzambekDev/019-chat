@@ -63,19 +63,15 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// --- NEW: USER SEARCH ROUTE ---
 app.get('/api/users/search', async (req, res) => {
     try {
         const { query } = req.query;
         if (!query) return res.json([]);
-        
-        // Find users starting with the query string (case-insensitive)
         const users = await User.find({ 
             username: { $regex: `^${query}`, $options: 'i' } 
         })
         .limit(5)
-        .select('username role'); // Only return necessary fields
-        
+        .select('username role');
         res.json(users);
     } catch (err) {
         res.status(500).json({ error: "Search failed" });
@@ -99,16 +95,26 @@ io.on('connection', (socket) => {
     console.log(`LINK_ESTABLISHED: ${socket.id}`);
 
     // --- 1. JOIN ROOM LOGIC ---
-    socket.on('join_room', async (room) => {
-        // Leave previous rooms
+    socket.on('join_room', async (data) => {
+        // data can now be an object { room, username }
+        const room = typeof data === 'string' ? data : data.room;
+        const userHandle = typeof data === 'object' ? data.username : null;
+
+        // Leave previous chat rooms, but NOT the personal username room
         socket.rooms.forEach(r => {
-            if (r !== socket.id) socket.leave(r);
+            if (r !== socket.id && r !== userHandle) socket.leave(r);
         });
 
         socket.join(room);
-        console.log(`OPERATOR_${socket.id} entered channel: ${room}`);
+        
+        // If username is provided, ensure they are always in their personal alert room
+        if (userHandle) {
+            socket.join(userHandle);
+            console.log(`OPERATOR_${userHandle} listening for alerts.`);
+        }
 
-        // Load messages specifically for this room/DM
+        console.log(`LINK_STABLE: Joined room ${room}`);
+
         const messages = await Message.find({ room: room || 'global' })
             .sort({ timestamp: 1 })
             .limit(50);
@@ -116,7 +122,7 @@ io.on('connection', (socket) => {
         socket.emit('load_messages', messages);
     });
 
-    // --- 2. MESSAGE & COIN LOGIC ---
+    // --- 2. MESSAGE & NOTIFICATION LOGIC ---
     socket.on('send_message', async (data) => {
         try {
             const targetRoom = data.room || 'global';
@@ -129,14 +135,27 @@ io.on('connection', (socket) => {
             });
             const savedMessage = await newMessage.save();
 
+            // Broadcast to everyone in the room
+            io.to(targetRoom).emit('receive_message', savedMessage); 
+
+            // --- NEW: PRIVATE MESSAGE NOTIFICATION ---
+            if (targetRoom.includes("_DM_")) {
+                const parts = targetRoom.split("_DM_");
+                const recipient = parts.find(p => p !== data.user);
+                
+                // Alert the recipient specifically
+                io.to(recipient).emit('incoming_dm_alert', {
+                    from: data.user,
+                    room: targetRoom,
+                    text: data.text || "Sent a GIF"
+                });
+            }
+
             const updatedUser = await User.findOneAndUpdate(
                 { username: data.user },
                 { $inc: { coins: 0.01 } },
                 { new: true }
             );
-
-            // Emit specifically to that room
-            io.to(targetRoom).emit('receive_message', savedMessage); 
 
             if (updatedUser) {
                 socket.emit('coin_update', updatedUser.coins);
@@ -146,16 +165,16 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- 3. DELETE LOGIC ---
+    // --- 3. DELETE/PURGE/ADMIN REMAIN UNCHANGED ---
     socket.on('delete_message', async (data) => {
         try {
             const { messageId, username } = data;
-            const message = await Message.findById(messageId);
+            const msg = await Message.findById(messageId);
             const user = await User.findOne({ username });
-            if (!message || !user) return;
+            if (!msg || !user) return;
 
-            if (message.sender === username || user.role === 'admin' || username === 'iloveshirin') {
-                const targetRoom = message.room;
+            if (msg.sender === username || user.role === 'admin' || username === 'iloveshirin') {
+                const targetRoom = msg.room;
                 await Message.findByIdAndDelete(messageId);
                 io.to(targetRoom).emit('message_deleted', messageId);
             }
@@ -164,21 +183,18 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- 4. PURGE LOGIC ---
     socket.on('clear_all_messages', async (username) => {
         try {
             const user = await User.findOne({ username });
             if (user && (user.role === 'admin' || username === 'iloveshirin')) {
                 await Message.deleteMany({});
                 io.emit('chat_cleared');
-                console.log(`--- GLOBAL_CHAT_PURGED_BY_${username} ---`);
             }
         } catch (err) {
             console.error("PURGE_ERROR:", err);
         }
     });
 
-    // --- 5. THEME PURCHASE LOGIC ---
     socket.on('purchase_theme', async ({ username, themeId, cost }) => {
         try {
             const user = await User.findOne({ username });
@@ -187,31 +203,19 @@ io.on('connection', (socket) => {
                 user.unlockedThemes.push(themeId);
                 user.activeTheme = themeId;
                 await user.save();
-                
                 socket.emit('coin_update', user.coins);
-                socket.emit('theme_unlocked', { 
-                    unlocked: user.unlockedThemes, 
-                    active: user.activeTheme 
-                });
+                socket.emit('theme_unlocked', { unlocked: user.unlockedThemes, active: user.activeTheme });
             }
         } catch (err) {
             console.error("PURCHASE_ERR:", err);
         }
     });
 
-    // --- 6. ADMIN COIN COMMAND ---
     socket.on('admin_grant_coins', async ({ username }) => {
         try {
             if (username === 'iloveshirin') {
-                const updatedUser = await User.findOneAndUpdate(
-                    { username },
-                    { $inc: { coins: 100 } },
-                    { new: true }
-                );
-                if (updatedUser) {
-                    socket.emit('coin_update', updatedUser.coins);
-                    console.log(`ADMIN_GRANT: 100 coins added to ${username}`);
-                }
+                const updatedUser = await User.findOneAndUpdate({ username }, { $inc: { coins: 100 } }, { new: true });
+                if (updatedUser) socket.emit('coin_update', updatedUser.coins);
             }
         } catch (err) {
             console.error("GRANT_ERROR:", err);
