@@ -5,6 +5,7 @@ const MessageSchema = new mongoose.Schema({
     text: { type: String, default: "" }, // Changed: text is NOT required
     gif: { type: String, default: "" },  // Added: gif field
     timestamp: { type: Date, default: Date.now },
+    room: { type: String, default: "global" }, // NEW: The ID of the chatroom
 });
 
 module.exports = mongoose.model('Message', MessageSchema);

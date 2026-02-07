@@ -23,7 +23,14 @@ app.post('/api/register', async (req, res) => {
     try {
         const { username, password } = req.body;
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = new User({ username, password: hashedPassword, role: 'user', coins: 0 });
+        const newUser = new User({ 
+            username, 
+            password: hashedPassword, 
+            role: 'user', 
+            coins: 0,
+            unlockedThemes: ['default'],
+            activeTheme: 'default'
+        });
         await newUser.save();
         res.status(201).json({ message: "User Created" });
     } catch (err) {
@@ -56,6 +63,25 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// --- NEW: USER SEARCH ROUTE ---
+app.get('/api/users/search', async (req, res) => {
+    try {
+        const { query } = req.query;
+        if (!query) return res.json([]);
+        
+        // Find users starting with the query string (case-insensitive)
+        const users = await User.find({ 
+            username: { $regex: `^${query}`, $options: 'i' } 
+        })
+        .limit(5)
+        .select('username role'); // Only return necessary fields
+        
+        res.json(users);
+    } catch (err) {
+        res.status(500).json({ error: "Search failed" });
+    }
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
@@ -72,17 +98,34 @@ mongoose.connect(process.env.MONGO_URI)
 io.on('connection', (socket) => {
     console.log(`LINK_ESTABLISHED: ${socket.id}`);
 
-    Message.find().sort({ timestamp: 1 }).limit(50).then(messages => {
+    // --- 1. JOIN ROOM LOGIC ---
+    socket.on('join_room', async (room) => {
+        // Leave previous rooms
+        socket.rooms.forEach(r => {
+            if (r !== socket.id) socket.leave(r);
+        });
+
+        socket.join(room);
+        console.log(`OPERATOR_${socket.id} entered channel: ${room}`);
+
+        // Load messages specifically for this room/DM
+        const messages = await Message.find({ room: room || 'global' })
+            .sort({ timestamp: 1 })
+            .limit(50);
+        
         socket.emit('load_messages', messages);
     });
 
-    // 1. MESSAGE & COIN LOGIC
+    // --- 2. MESSAGE & COIN LOGIC ---
     socket.on('send_message', async (data) => {
         try {
+            const targetRoom = data.room || 'global';
+
             const newMessage = new Message({ 
                 sender: data.user, 
                 text: data.text || "", 
-                gif: data.gif || "" 
+                gif: data.gif || "",
+                room: targetRoom
             });
             const savedMessage = await newMessage.save();
 
@@ -92,7 +135,9 @@ io.on('connection', (socket) => {
                 { new: true }
             );
 
-            io.emit('receive_message', savedMessage); 
+            // Emit specifically to that room
+            io.to(targetRoom).emit('receive_message', savedMessage); 
+
             if (updatedUser) {
                 socket.emit('coin_update', updatedUser.coins);
             }
@@ -101,7 +146,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 2. DELETE LOGIC
+    // --- 3. DELETE LOGIC ---
     socket.on('delete_message', async (data) => {
         try {
             const { messageId, username } = data;
@@ -110,29 +155,30 @@ io.on('connection', (socket) => {
             if (!message || !user) return;
 
             if (message.sender === username || user.role === 'admin' || username === 'iloveshirin') {
+                const targetRoom = message.room;
                 await Message.findByIdAndDelete(messageId);
-                io.emit('message_deleted', messageId);
+                io.to(targetRoom).emit('message_deleted', messageId);
             }
         } catch (err) {
             console.error("DELETE_ERROR:", err);
         }
     });
 
-    // 3. PURGE LOGIC
+    // --- 4. PURGE LOGIC ---
     socket.on('clear_all_messages', async (username) => {
         try {
             const user = await User.findOne({ username });
             if (user && (user.role === 'admin' || username === 'iloveshirin')) {
                 await Message.deleteMany({});
                 io.emit('chat_cleared');
-                console.log(`--- CHAT_PURGED_BY_${username} ---`);
+                console.log(`--- GLOBAL_CHAT_PURGED_BY_${username} ---`);
             }
         } catch (err) {
             console.error("PURGE_ERROR:", err);
         }
     });
 
-    // 4. THEME PURCHASE LOGIC
+    // --- 5. THEME PURCHASE LOGIC ---
     socket.on('purchase_theme', async ({ username, themeId, cost }) => {
         try {
             const user = await User.findOne({ username });
@@ -153,7 +199,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 5. ADMIN COIN COMMAND
+    // --- 6. ADMIN COIN COMMAND ---
     socket.on('admin_grant_coins', async ({ username }) => {
         try {
             if (username === 'iloveshirin') {
