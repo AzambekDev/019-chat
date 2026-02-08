@@ -96,24 +96,23 @@ io.on('connection', (socket) => {
 
     // --- 1. JOIN ROOM LOGIC ---
     socket.on('join_room', async (data) => {
-        // data can now be an object { room, username }
         const room = typeof data === 'string' ? data : data.room;
         const userHandle = typeof data === 'object' ? data.username : null;
 
-        // Leave previous chat rooms, but NOT the personal username room
+        // Leave previous chat rooms, but keep the personal user room
         socket.rooms.forEach(r => {
             if (r !== socket.id && r !== userHandle) socket.leave(r);
         });
 
         socket.join(room);
         
-        // If username is provided, ensure they are always in their personal alert room
+        // Ensure the user is always in a room named after themselves for notifications
         if (userHandle) {
             socket.join(userHandle);
-            console.log(`OPERATOR_${userHandle} listening for alerts.`);
+            console.log(`ALERTS_ACTIVE for ${userHandle}`);
         }
 
-        console.log(`LINK_STABLE: Joined room ${room}`);
+        console.log(`LINK_STABLE: Room ${room}`);
 
         const messages = await Message.find({ room: room || 'global' })
             .sort({ timestamp: 1 })
@@ -127,27 +126,28 @@ io.on('connection', (socket) => {
         try {
             const targetRoom = data.room || 'global';
 
+            // Now storing the encryption flag in the database
             const newMessage = new Message({ 
                 sender: data.user, 
                 text: data.text || "", 
                 gif: data.gif || "",
-                room: targetRoom
+                room: targetRoom,
+                isEncrypted: data.isEncrypted || false // New Field
             });
             const savedMessage = await newMessage.save();
 
-            // Broadcast to everyone in the room
+            // Broadcast to everyone in the specific room
             io.to(targetRoom).emit('receive_message', savedMessage); 
 
-            // --- NEW: PRIVATE MESSAGE NOTIFICATION ---
+            // Handle DM alerts (triggers the beep on the frontend)
             if (targetRoom.includes("_DM_")) {
                 const parts = targetRoom.split("_DM_");
                 const recipient = parts.find(p => p !== data.user);
                 
-                // Alert the recipient specifically
                 io.to(recipient).emit('incoming_dm_alert', {
                     from: data.user,
                     room: targetRoom,
-                    text: data.text || "Sent a GIF"
+                    text: data.isEncrypted ? "ENCRYPTED_TRANSMISSION_RECEIVED" : (data.text || "Sent a GIF")
                 });
             }
 
@@ -165,7 +165,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- 3. DELETE/PURGE/ADMIN REMAIN UNCHANGED ---
+    // --- 3. DELETE/PURGE/ADMIN ---
     socket.on('delete_message', async (data) => {
         try {
             const { messageId, username } = data;
