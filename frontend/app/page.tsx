@@ -90,16 +90,30 @@ export default function Home() {
     } catch (e) { console.error("Audio block", e); }
   };
 
+  // --- 1. PERSISTENCE LOAD ---
   useEffect(() => {
     setMounted(true);
     const savedUser = localStorage.getItem("019_operator_name");
     const token = localStorage.getItem("019_token");
+    const savedDMs = localStorage.getItem("019_active_dms");
+
     if (savedUser && token) {
       setUsername(savedUser);
       setIsLoggedIn(true);
+      if (savedDMs) setActiveDMs(JSON.parse(savedDMs));
       if (!socket.connected) socket.connect();
     }
+  }, []);
 
+  // --- 2. PERSISTENCE SAVE ---
+  useEffect(() => {
+    if (activeDMs.length > 0) {
+      localStorage.setItem("019_active_dms", JSON.stringify(activeDMs));
+    }
+  }, [activeDMs]);
+
+  // --- 3. SOCKET LISTENERS ---
+  useEffect(() => {
     socket.on("load_messages", (messages: Message[]) => {
       const decrypted = messages.map(m => m.isEncrypted ? { ...m, text: crypt(m.text || "") } : m);
       setChat(decrypted);
@@ -113,9 +127,11 @@ export default function Home() {
     });
 
     socket.on("incoming_dm_alert", (data: { from: string, room: string, text: string }) => {
+      // FIX: Force update Sidebar for the recipient
+      setActiveDMs((prev) => prev.includes(data.from) ? prev : [...prev, data.from]);
+
       if (currentRoom !== data.room) {
         playSystemBeep(440, 0.2); 
-        setActiveDMs(prev => prev.includes(data.from) ? prev : [...prev, data.from]);
         setNotifications(prev => ({ ...prev, [data.room]: (prev[data.room] || 0) + 1 }));
         setToast({ msg: data.text, from: data.from });
         setTimeout(() => setToast(null), 4000);
@@ -254,11 +270,10 @@ export default function Home() {
   return (
     <main className="fixed inset-0 bg-[#050505] flex items-center justify-center overflow-hidden" style={{ color: themeColor } as CSSProperties}>
       
-      {/* TOAST SYSTEM */}
       {toast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm bg-black border p-3 shadow-2xl animate-in slide-in-from-top-full duration-300" style={{ borderColor: themeColor }}>
           <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-50">Signal_Detected</p>
-          <p className="text-xs font-bold text-white mt-1">@{toast.from}: <span className="font-normal opacity-70">Encypted_Msg...</span></p>
+          <p className="text-xs font-bold text-white mt-1">@{toast.from}: <span className="font-normal opacity-70">Secured_Msg...</span></p>
         </div>
       )}
 
@@ -270,7 +285,10 @@ export default function Home() {
           </div>
           <div className="space-y-4">
             <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all" style={{ borderColor: themeColor } as CSSProperties} placeholder="OPERATOR_ID" value={username} onChange={(e) => setUsername(e.target.value)} />
-            <input type="password" className="w-full bg-transparent border-b p-3 outline-none text-base" style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURITY_KEY" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <input type="password" 
+                   className="w-full bg-transparent border-b p-3 outline-none text-base" 
+                   style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURITY_KEY" 
+                   value={password} onChange={(e) => setPassword(e.target.value)} />
             <button onClick={handleAuth} className="w-full text-black font-black py-4 uppercase text-sm mt-4 hover:brightness-110 active:scale-95 transition-all" style={{ backgroundColor: themeColor } as CSSProperties}>Establish_Link</button>
             <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[10px] text-zinc-600 hover:text-white uppercase tracking-widest mt-4">{isRegistering ? "Back to Login" : "Request Entry"}</button>
           </div>
@@ -278,11 +296,11 @@ export default function Home() {
       ) : (
         <div className="w-full h-full md:h-[92vh] md:max-w-6xl grid grid-cols-1 md:grid-cols-[260px_1fr] md:border border-zinc-900 bg-black md:rounded-sm overflow-hidden">
           
-          {/* SIDEBAR DRAWER */}
+          {/* SIDEBAR */}
           <div className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-50 w-[85%] md:w-full h-full border-r border-zinc-900 bg-[#080808] p-6 flex flex-col justify-between transition-transform duration-300`}>
             <div className="overflow-y-auto scrollbar-hide">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-black tracking-tighter italic text-white uppercase">019_System</h2>
+                <h2 className="text-xl font-black tracking-tighter italic text-white uppercase leading-none">019_System</h2>
                 <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-white text-xl p-2">✕</button>
               </div>
               <p className="text-2xl text-yellow-500 font-black tracking-tighter mb-6">{coins.toFixed(2)} ⌬</p>
@@ -397,7 +415,7 @@ export default function Home() {
                 </div>
                 <form onSubmit={sendMessage} className="flex gap-2 items-center">
                   <button type="button" onClick={() => setShowGifs(!showGifs)} className="px-3 md:px-4 py-3 text-[10px] font-black border uppercase" style={{ backgroundColor: showGifs ? themeColor : 'transparent', borderColor: showGifs ? themeColor : '#27272a', color: showGifs ? 'black' : 'inherit' } as CSSProperties}>GIF</button>
-                  <input type="text" className="flex-1 bg-[#0f0f0f] border border-zinc-800 p-3 text-base focus:outline-none text-white" onFocus={(e) => e.target.style.borderColor = themeColor} onBlur={(e) => e.target.style.borderColor = '#27272a'} placeholder={encryptEnabled ? "Secure data..." : "Type..." } value={message} onChange={(e) => setMessage(e.target.value)} />
+                  <input type="text" className="flex-1 bg-[#0f0f0f] border border-zinc-800 p-3 text-base focus:outline-none text-white" onFocus={(e) => e.currentTarget.style.borderColor = themeColor} onBlur={(e) => e.currentTarget.style.borderColor = '#27272a'} placeholder={encryptEnabled ? "Secure data..." : "Type..." } value={message} onChange={(e) => setMessage(e.target.value)} />
                   <button type="submit" className="px-4 md:px-8 py-3 font-black text-[10px] uppercase text-black" style={{ backgroundColor: themeColor } as CSSProperties}>SEND</button>
                 </form>
               </div>

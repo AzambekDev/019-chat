@@ -99,17 +99,17 @@ io.on('connection', (socket) => {
         const room = typeof data === 'string' ? data : data.room;
         const userHandle = typeof data === 'object' ? data.username : null;
 
-        // Leave previous chat rooms, but keep the personal user room
+        // Leave previous chat rooms, but NOT the personal username room
         socket.rooms.forEach(r => {
             if (r !== socket.id && r !== userHandle) socket.leave(r);
         });
 
         socket.join(room);
         
-        // Ensure the user is always in a room named after themselves for notifications
+        // If username is provided, ensure they are always in their personal alert room
         if (userHandle) {
             socket.join(userHandle);
-            console.log(`ALERTS_ACTIVE for ${userHandle}`);
+            console.log(`OPERATOR_${userHandle} listening for alerts.`);
         }
 
         console.log(`LINK_STABLE: Room ${room}`);
@@ -126,28 +126,28 @@ io.on('connection', (socket) => {
         try {
             const targetRoom = data.room || 'global';
 
-            // Now storing the encryption flag in the database
             const newMessage = new Message({ 
                 sender: data.user, 
                 text: data.text || "", 
                 gif: data.gif || "",
                 room: targetRoom,
-                isEncrypted: data.isEncrypted || false // New Field
+                isEncrypted: data.isEncrypted || false
             });
             const savedMessage = await newMessage.save();
 
             // Broadcast to everyone in the specific room
             io.to(targetRoom).emit('receive_message', savedMessage); 
 
-            // Handle DM alerts (triggers the beep on the frontend)
+            // Handle DM alerts (triggers sidebar update and beep for recipient)
             if (targetRoom.includes("_DM_")) {
                 const parts = targetRoom.split("_DM_");
                 const recipient = parts.find(p => p !== data.user);
                 
+                // IMPORTANT: Emit to the recipient's personal room handle
                 io.to(recipient).emit('incoming_dm_alert', {
                     from: data.user,
                     room: targetRoom,
-                    text: data.isEncrypted ? "ENCRYPTED_TRANSMISSION_RECEIVED" : (data.text || "Sent a GIF")
+                    text: data.isEncrypted ? "ENCRYPTED_SIGNAL" : (data.text || "Sent a GIF")
                 });
             }
 
