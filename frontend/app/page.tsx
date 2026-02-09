@@ -22,13 +22,6 @@ interface Message {
   id?: string;
 }
 
-interface UserProfile {
-  username: string;
-  bio: string;
-  avatar: string;
-  status: string;
-}
-
 interface Theme {
   id: string;
   name: string;
@@ -39,7 +32,14 @@ interface Theme {
 interface UserResult {
   username: string;
   role: string;
-  status?: string;
+  status?: string; 
+}
+
+interface UserProfile {
+  username: string;
+  bio: string;
+  avatar: string;
+  status: string;
 }
 
 const THEMES: Theme[] = [
@@ -55,21 +55,24 @@ export default function Home() {
   // --- CORE STATES ---
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
-  const [email, setEmail] = useState<string>(""); // New
-  const [avatar, setAvatar] = useState<string>(""); // New
-  const [bio, setBio] = useState<string>(""); // New
+  const [email, setEmail] = useState<string>(""); 
+  const [avatar, setAvatar] = useState<string>(""); 
+  const [bio, setBio] = useState<string>(""); 
+  const [avatarPos, setAvatarPos] = useState<number>(50); // New: Crop Position
   
   const [isRegistering, setIsRegistering] = useState<boolean>(false);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [mounted, setMounted] = useState<boolean>(false);
   const [coins, setCoins] = useState<number>(0);
   
+  // --- ROOM & NOTIFICATION STATES ---
   const [currentRoom, setCurrentRoom] = useState<string>("global");
   const [activeDMs, setActiveDMs] = useState<string[]>([]); 
   const [notifications, setNotifications] = useState<Record<string, number>>({}); 
   const [chat, setChat] = useState<Message[]>([]);
   const [message, setMessage] = useState<string>("");
 
+  // --- UI & SECURITY STATES ---
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [toast, setToast] = useState<{ msg: string; from: string } | null>(null);
   const [encryptEnabled, setEncryptEnabled] = useState<boolean>(false);
@@ -82,6 +85,7 @@ export default function Home() {
   const [userSearch, setUserSearch] = useState<string>("");
   const [searchResults, setSearchResults] = useState<UserResult[]>([]);
 
+  // --- NEW PROFILE STATES ---
   const [viewingProfile, setViewingProfile] = useState<UserProfile | null>(null);
   const [isEditingBio, setIsEditingBio] = useState(false);
   const [bioInput, setBioInput] = useState("");
@@ -89,6 +93,7 @@ export default function Home() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const themeColor = THEMES.find(t => t.id === activeTheme)?.color || '#22c55e';
 
+  // --- SYSTEM BEEP GENERATOR ---
   const playSystemBeep = (freq = 880, duration = 0.1) => {
     try {
       const context = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -166,6 +171,10 @@ export default function Home() {
       socket.off("receive_message");
       socket.off("incoming_dm_alert");
       socket.off("user_status_change");
+      socket.off("coin_update");
+      socket.off("theme_unlocked");
+      socket.off("message_deleted");
+      socket.off("chat_cleared");
     };
   }, [currentRoom, viewingProfile]);
 
@@ -182,15 +191,6 @@ export default function Home() {
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat, showShop]);
-
-  const handleLogout = () => {
-    localStorage.clear();
-    window.location.reload();
-  };
-
-  const handlePurchase = (themeId: string, cost: number) => {
-    socket.emit('purchase_theme', { username, themeId, cost });
-  };
 
   const openProfile = async (target: string) => {
     try {
@@ -217,9 +217,9 @@ export default function Home() {
 
   const handleAuth = async () => {
     const endpoint = isRegistering ? "register" : "login";
-    // Build Payload for sign up
+    // Build Payload for sign up - including horizontal crop position
     const payload = isRegistering 
-      ? { username, password, email, avatar, bio } 
+      ? { username, password, email, avatar, bio, avatarPos } 
       : { username, password };
 
     try {
@@ -233,7 +233,10 @@ export default function Home() {
       if (res.ok) {
         localStorage.setItem("019_token", data.token);
         localStorage.setItem("019_operator_name", data.username);
+        localStorage.setItem("019_role", data.role);
         setCoins(data.coins || 0);
+        setUnlockedThemes(data.unlockedThemes || ['default']);
+        setActiveTheme(data.activeTheme || 'default');
         setIsLoggedIn(true);
         socket.connect();
         playSystemBeep(1200, 0.2);
@@ -302,6 +305,15 @@ export default function Home() {
     setShowGifs(false);
   };
 
+  const handleLogout = () => {
+    localStorage.clear();
+    window.location.reload();
+  };
+
+  const handlePurchase = (themeId: string, cost: number) => {
+    socket.emit('purchase_theme', { username, themeId, cost });
+  };
+
   if (!mounted) return null;
 
   return (
@@ -356,19 +368,54 @@ export default function Home() {
       )}
 
       {!isLoggedIn ? (
-        <div className="w-full max-w-sm border bg-black p-8 mx-4 rounded-sm shadow-2xl" style={{ borderColor: themeColor } as CSSProperties}>
+        <div className="w-full max-w-sm border bg-black p-8 mx-4 rounded-sm shadow-2xl overflow-y-auto max-h-screen no-scrollbar" style={{ borderColor: themeColor } as CSSProperties}>
           <div className="text-center mb-8 uppercase tracking-widest">
             <h1 className="text-3xl font-black italic tracking-tighter">Protocol_019</h1>
             <p className="text-[9px] opacity-50 mt-1">Encrypted_Access_Only</p>
           </div>
+          
           <div className="space-y-4">
+            {/* AVATAR LIVE CROP PREVIEW */}
+            {isRegistering && avatar && (
+              <div className="flex flex-col items-center mb-4 animate-in zoom-in-95 duration-300">
+                <div className="w-20 h-20 rounded-full border-2 overflow-hidden bg-zinc-900 mb-2 shadow-xl" style={{ borderColor: themeColor }}>
+                  <img 
+                    src={avatar} 
+                    alt="Preview" 
+                    className="w-full h-full object-cover"
+                    style={{ objectPosition: `${avatarPos}% center` }} 
+                    onError={(e) => (e.currentTarget.style.opacity = '0')}
+                    onLoad={(e) => (e.currentTarget.style.opacity = '1')}
+                  />
+                </div>
+                <p className="text-[8px] uppercase font-bold opacity-40 mb-1">Adjust_Alignment</p>
+                <input 
+                  type="range" 
+                  min="0" max="100" 
+                  value={avatarPos} 
+                  onChange={(e) => setAvatarPos(parseInt(e.target.value))}
+                  className="w-full h-1 bg-zinc-800 appearance-none cursor-pointer accent-white"
+                />
+              </div>
+            )}
+
             <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" style={{ borderColor: themeColor } as CSSProperties} placeholder="OPERATOR_ID" value={username} onChange={(e) => setUsername(e.target.value)} />
             
-            {/* NEW REGISTRATION FIELDS */}
             {isRegistering && (
               <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                 <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURE_EMAIL" value={email} onChange={(e) => setEmail(e.target.value)} />
-                <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" style={{ borderColor: themeColor } as CSSProperties} placeholder="AVATAR_URL" value={avatar} onChange={(e) => setAvatar(e.target.value)} />
+                
+                <div className="relative group">
+                  <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800 pr-10" style={{ borderColor: themeColor } as CSSProperties} placeholder="AVATAR_URL" value={avatar} onChange={(e) => setAvatar(e.target.value)} />
+                  <div className="absolute right-2 top-3 cursor-help opacity-40 hover:opacity-100 transition-opacity">
+                    <span className="text-[10px] border rounded-full w-4 h-4 flex items-center justify-center font-bold" style={{ borderColor: themeColor }}>i</span>
+                    <div className="absolute bottom-full right-0 mb-2 w-48 p-2 bg-[#111] border border-zinc-800 text-[10px] leading-tight text-zinc-400 hidden group-hover:block z-50 shadow-2xl pointer-events-none font-mono">
+                      <p className="font-black text-white mb-1 uppercase tracking-tighter">[GUIDE]</p>
+                      Right-click any web image &gt; "Copy Image Address". Paste here. Use slider to center.
+                    </div>
+                  </div>
+                </div>
+
                 <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" style={{ borderColor: themeColor } as CSSProperties} placeholder="INITIAL_BIO" value={bio} onChange={(e) => setBio(e.target.value)} />
               </div>
             )}
@@ -377,6 +424,7 @@ export default function Home() {
                    className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" 
                    style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURITY_KEY" 
                    value={password} onChange={(e) => setPassword(e.target.value)} />
+            
             <button onClick={handleAuth} className="w-full text-black font-black py-4 uppercase text-sm mt-4 hover:brightness-110 active:scale-95 transition-all shadow-lg" style={{ backgroundColor: themeColor } as CSSProperties}>
                 {isRegistering ? "Register_Identity" : "Establish_Link"}
             </button>
@@ -386,6 +434,7 @@ export default function Home() {
           </div>
         </div>
       ) : (
+        /* --- MAIN INTERFACE --- */
         <div className="w-full h-full md:h-[92vh] md:max-w-6xl grid grid-cols-1 md:grid-cols-[260px_1fr] md:border border-zinc-900 bg-black md:rounded-sm overflow-hidden">
           {/* SIDEBAR DRAWER */}
           <div className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-50 w-[85%] md:w-full h-full border-r border-zinc-900 bg-[#080808] p-6 flex flex-col justify-between transition-transform duration-300 ease-in-out`}>
@@ -427,7 +476,7 @@ export default function Home() {
                   {activeDMs.map((dmUser) => {
                     const dmRoomId = [username, dmUser].sort().join("_DM_");
                     return (
-                      <button key={dmUser} onClick={() => { setShowShop(false); setCurrentRoom(dmRoomId); setIsSidebarOpen(false); }} className={`w-full text-left text-[11px] p-3 transition-all uppercase font-bold flex justify-between items-center ${currentRoom === dmRoomId && !showShop ? 'bg-white/5 border-l-2' : 'opacity-40 hover:opacity-100'}`} style={{ borderColor: currentRoom === dmRoomId && !showShop ? themeColor : 'transparent' }}>
+                      <button key={dmUser} onClick={() => { setShowShop(false); setCurrentRoom(dmRoomId); setIsSidebarOpen(false); }} className={`w-full text-left text-[11px] p-3 transition-all uppercase font-bold flex justify-between items-center ${currentRoom === dmRoomId && !showShop ? 'bg-white/5 border-l-2' : 'opacity-40'}`} style={{ borderColor: currentRoom === dmRoomId && !showShop ? themeColor : 'transparent' }}>
                         <span className="truncate pr-2">@ {dmUser}</span>
                         {notifications[dmRoomId] > 0 && <span className="bg-red-600 text-white text-[10px] px-2 rounded-full animate-pulse">{notifications[dmRoomId]}</span>}
                       </button>

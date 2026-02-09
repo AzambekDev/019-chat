@@ -11,7 +11,8 @@ const UserSchema = new mongoose.Schema({
     status: { type: String, default: "ONLINE" },
     lastSeen: { type: Date, default: Date.now },
     unlockedThemes: { type: [String], default: ['default'] },
-    activeTheme: { type: String, default: 'default' }
+    activeTheme: { type: String, default: 'default' },
+    avatarPos: { type: Number, default: 50 }
 });
 
 module.exports = mongoose.model('User', UserSchema);
