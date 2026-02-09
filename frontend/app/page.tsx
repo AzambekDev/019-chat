@@ -58,7 +58,7 @@ export default function Home() {
   const [email, setEmail] = useState<string>(""); 
   const [avatar, setAvatar] = useState<string>(""); 
   const [bio, setBio] = useState<string>(""); 
-  const [avatarPos, setAvatarPos] = useState<number>(50); // New: Crop Position
+  const [avatarPos, setAvatarPos] = useState<number>(50); // Horizontal Crop Position
   
   const [isRegistering, setIsRegistering] = useState<boolean>(false);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
@@ -217,7 +217,6 @@ export default function Home() {
 
   const handleAuth = async () => {
     const endpoint = isRegistering ? "register" : "login";
-    // Build Payload for sign up - including horizontal crop position
     const payload = isRegistering 
       ? { username, password, email, avatar, bio, avatarPos } 
       : { username, password };
@@ -375,25 +374,25 @@ export default function Home() {
           </div>
           
           <div className="space-y-4">
-            {/* AVATAR LIVE CROP PREVIEW */}
+            {/* AVATAR LIVE PREVIEW & CROPPER */}
             {isRegistering && avatar && (
-              <div className="flex flex-col items-center mb-4 animate-in zoom-in-95 duration-300">
-                <div className="w-20 h-20 rounded-full border-2 overflow-hidden bg-zinc-900 mb-2 shadow-xl" style={{ borderColor: themeColor }}>
+              <div className="flex flex-col items-center mb-6 animate-in zoom-in-95 duration-300 bg-white/5 p-4 border border-white/5 rounded-sm">
+                <div className="w-24 h-24 rounded-full border-2 overflow-hidden bg-zinc-900 mb-3 shadow-[0_0_15px_rgba(0,0,0,0.5)]" style={{ borderColor: themeColor }}>
                   <img 
                     src={avatar} 
                     alt="Preview" 
                     className="w-full h-full object-cover"
                     style={{ objectPosition: `${avatarPos}% center` }} 
-                    onError={(e) => (e.currentTarget.style.opacity = '0')}
-                    onLoad={(e) => (e.currentTarget.style.opacity = '1')}
+                    onError={(e) => (e.currentTarget.style.display = 'none')}
+                    onLoad={(e) => (e.currentTarget.style.display = 'block')}
                   />
                 </div>
-                <p className="text-[8px] uppercase font-bold opacity-40 mb-1">Adjust_Alignment</p>
+                <p className="text-[8px] uppercase font-black tracking-[0.2em] mb-2" style={{ color: themeColor }}>Focus_Alignment: {avatarPos}%</p>
                 <input 
                   type="range" 
                   min="0" max="100" 
                   value={avatarPos} 
-                  onChange={(e) => setAvatarPos(parseInt(e.target.value))}
+                  onChange={(e) => setAvatarPos(Number(e.target.value))}
                   className="w-full h-1 bg-zinc-800 appearance-none cursor-pointer accent-white"
                 />
               </div>
@@ -436,7 +435,6 @@ export default function Home() {
       ) : (
         /* --- MAIN INTERFACE --- */
         <div className="w-full h-full md:h-[92vh] md:max-w-6xl grid grid-cols-1 md:grid-cols-[260px_1fr] md:border border-zinc-900 bg-black md:rounded-sm overflow-hidden">
-          {/* SIDEBAR DRAWER */}
           <div className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-50 w-[85%] md:w-full h-full border-r border-zinc-900 bg-[#080808] p-6 flex flex-col justify-between transition-transform duration-300 ease-in-out`}>
             <div className="overflow-y-auto scrollbar-hide">
               <div className="flex justify-between items-center mb-6">
