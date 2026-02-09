@@ -22,6 +22,13 @@ interface Message {
   id?: string;
 }
 
+interface UserProfile {
+  username: string;
+  bio: string;
+  avatar: string;
+  status: string;
+}
+
 interface Theme {
   id: string;
   name: string;
@@ -32,15 +39,7 @@ interface Theme {
 interface UserResult {
   username: string;
   role: string;
-  status?: string; // Added for profile status
-}
-
-// Added for Profile System
-interface UserProfile {
-  username: string;
-  bio: string;
-  avatar: string;
-  status: string;
+  status?: string;
 }
 
 const THEMES: Theme[] = [
@@ -56,19 +55,21 @@ export default function Home() {
   // --- CORE STATES ---
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
+  const [email, setEmail] = useState<string>(""); // New
+  const [avatar, setAvatar] = useState<string>(""); // New
+  const [bio, setBio] = useState<string>(""); // New
+  
   const [isRegistering, setIsRegistering] = useState<boolean>(false);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [mounted, setMounted] = useState<boolean>(false);
   const [coins, setCoins] = useState<number>(0);
   
-  // --- ROOM & NOTIFICATION STATES ---
   const [currentRoom, setCurrentRoom] = useState<string>("global");
   const [activeDMs, setActiveDMs] = useState<string[]>([]); 
   const [notifications, setNotifications] = useState<Record<string, number>>({}); 
   const [chat, setChat] = useState<Message[]>([]);
   const [message, setMessage] = useState<string>("");
 
-  // --- UI & SECURITY STATES ---
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [toast, setToast] = useState<{ msg: string; from: string } | null>(null);
   const [encryptEnabled, setEncryptEnabled] = useState<boolean>(false);
@@ -81,7 +82,6 @@ export default function Home() {
   const [userSearch, setUserSearch] = useState<string>("");
   const [searchResults, setSearchResults] = useState<UserResult[]>([]);
 
-  // --- NEW PROFILE STATES ---
   const [viewingProfile, setViewingProfile] = useState<UserProfile | null>(null);
   const [isEditingBio, setIsEditingBio] = useState(false);
   const [bioInput, setBioInput] = useState("");
@@ -89,7 +89,6 @@ export default function Home() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const themeColor = THEMES.find(t => t.id === activeTheme)?.color || '#22c55e';
 
-  // --- SYSTEM BEEP GENERATOR (Web Audio API) ---
   const playSystemBeep = (freq = 880, duration = 0.1) => {
     try {
       const context = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -103,10 +102,9 @@ export default function Home() {
       gain.connect(context.destination);
       oscillator.start();
       oscillator.stop(context.currentTime + duration);
-    } catch (e) { console.error("Audio restricted by browser policy"); }
+    } catch (e) { console.error("Audio restricted"); }
   };
 
-  // --- 1. INITIAL PERSISTENCE LOAD ---
   useEffect(() => {
     setMounted(true);
     const savedUser = localStorage.getItem("019_operator_name");
@@ -121,14 +119,12 @@ export default function Home() {
     }
   }, []);
 
-  // --- 2. PERSISTENCE SAVE (Local History) ---
   useEffect(() => {
     if (activeDMs.length > 0) {
       localStorage.setItem("019_active_dms", JSON.stringify(activeDMs));
     }
   }, [activeDMs]);
 
-  // --- 3. SOCKET LISTENERS & HANDSHAKES ---
   useEffect(() => {
     socket.on("load_messages", (messages: Message[]) => {
       const decrypted = messages.map(m => m.isEncrypted ? { ...m, text: crypt(m.text || "") } : m);
@@ -144,7 +140,6 @@ export default function Home() {
 
     socket.on("incoming_dm_alert", (data: { from: string, room: string, text: string }) => {
       setActiveDMs((prev) => prev.includes(data.from) ? prev : [...prev, data.from]);
-
       if (currentRoom !== data.room) {
         playSystemBeep(440, 0.2); 
         setNotifications(prev => ({ ...prev, [data.room]: (prev[data.room] || 0) + 1 }));
@@ -153,7 +148,6 @@ export default function Home() {
       }
     });
 
-    // Profile Status Listener
     socket.on("user_status_change", (data: { username: string, status: string }) => {
       if (viewingProfile?.username === data.username) {
         setViewingProfile(prev => prev ? { ...prev, status: data.status } : null);
@@ -169,23 +163,16 @@ export default function Home() {
     socket.on("chat_cleared", () => setChat([]));
 
     return () => {
-      socket.off("load_messages");
       socket.off("receive_message");
       socket.off("incoming_dm_alert");
       socket.off("user_status_change");
-      socket.off("coin_update");
-      socket.off("theme_unlocked");
-      socket.off("message_deleted");
-      socket.off("chat_cleared");
     };
   }, [currentRoom, viewingProfile]);
 
-  // --- 4. SECURE ROOM HANDSHAKE ---
   useEffect(() => {
     if (isLoggedIn && username) {
       socket.emit("join_room", { room: username, username: username });
       socket.emit("join_room", { room: currentRoom, username: username });
-
       if (notifications[currentRoom]) {
         setNotifications(prev => ({ ...prev, [currentRoom]: 0 }));
       }
@@ -196,7 +183,15 @@ export default function Home() {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat, showShop]);
 
-  // --- 5. NEW PROFILE LOGIC ---
+  const handleLogout = () => {
+    localStorage.clear();
+    window.location.reload();
+  };
+
+  const handlePurchase = (themeId: string, cost: number) => {
+    socket.emit('purchase_theme', { username, themeId, cost });
+  };
+
   const openProfile = async (target: string) => {
     try {
       const res = await fetch(`https://zero19-chat.onrender.com/api/users/profile/${target}`);
@@ -220,49 +215,37 @@ export default function Home() {
     } catch (err) { console.error("UPDATE_ERR"); }
   };
 
-  // --- 6. LOGIC FUNCTIONS ---
-  const handleLogout = () => {
-    localStorage.clear();
-    window.location.reload();
-  };
-
-  const handlePurchase = (themeId: string, cost: number) => {
-    socket.emit('purchase_theme', { username, themeId, cost });
-  };
-
   const handleAuth = async () => {
     const endpoint = isRegistering ? "register" : "login";
+    // Build Payload for sign up
+    const payload = isRegistering 
+      ? { username, password, email, avatar, bio } 
+      : { username, password };
+
     try {
       const res = await fetch(`https://zero19-chat.onrender.com/api/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
+      
       if (res.ok) {
-        if (isRegistering) {
-          setIsRegistering(false);
-          alert("IDENTITY_REGISTERED");
-        } else {
-          localStorage.setItem("019_token", data.token);
-          localStorage.setItem("019_operator_name", data.username);
-          localStorage.setItem("019_role", data.role);
-          setCoins(data.coins || 0);
-          setUnlockedThemes(data.unlockedThemes || ['default']);
-          setActiveTheme(data.activeTheme || 'default');
-          setIsLoggedIn(true);
-          socket.connect();
-        }
+        localStorage.setItem("019_token", data.token);
+        localStorage.setItem("019_operator_name", data.username);
+        setCoins(data.coins || 0);
+        setIsLoggedIn(true);
+        socket.connect();
+        playSystemBeep(1200, 0.2);
+      } else {
+        alert(data.error || "AUTH_FAILED");
       }
     } catch (err) { console.error("CONNECTION_ERROR"); }
   };
 
   const handleUserSearch = async (val: string) => {
     setUserSearch(val);
-    if (val.length < 2) {
-      setSearchResults([]);
-      return;
-    }
+    if (val.length < 2) return setSearchResults([]);
     try {
       const res = await fetch(`https://zero19-chat.onrender.com/api/users/search?query=${val}`);
       const data = await res.json();
@@ -278,6 +261,7 @@ export default function Home() {
     setSearchResults([]);
     setShowShop(false);
     setIsSidebarOpen(false);
+    setViewingProfile(null);
     playSystemBeep(600, 0.05);
   };
 
@@ -291,7 +275,6 @@ export default function Home() {
         setMessage("");
         return;
       }
-
       const payload = { 
         user: username, 
         text: encryptEnabled ? crypt(trimmed) : trimmed, 
@@ -299,7 +282,6 @@ export default function Home() {
         room: currentRoom,
         isEncrypted: encryptEnabled
       };
-      
       socket.emit("send_message", payload);
       playSystemBeep(800, 0.05);
       setMessage("");
@@ -325,7 +307,7 @@ export default function Home() {
   return (
     <main className="fixed inset-0 bg-[#050505] flex items-center justify-center overflow-hidden" style={{ color: themeColor } as CSSProperties}>
       
-      {/* DOSSIER MODAL (PROFILE) */}
+      {/* DOSSIER MODAL */}
       {viewingProfile && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-md animate-in fade-in duration-200">
           <div className="w-full max-w-sm border bg-[#080808] p-6 shadow-2xl" style={{ borderColor: themeColor }}>
@@ -343,7 +325,6 @@ export default function Home() {
               </div>
               <button onClick={() => {setViewingProfile(null); setIsEditingBio(false);}} className="text-white hover:opacity-50 transition-opacity">✕</button>
             </div>
-
             <div className="space-y-6">
               <div>
                 <p className="text-[9px] uppercase font-bold text-zinc-500 mb-2 tracking-[0.2em]">Operator_Bio</p>
@@ -353,7 +334,6 @@ export default function Home() {
                   <p className="text-sm bg-black/40 p-4 border border-zinc-900 italic text-zinc-300">"{viewingProfile.bio}"</p>
                 )}
               </div>
-
               {viewingProfile.username === username ? (
                 <button onClick={() => isEditingBio ? saveBio() : setIsEditingBio(true)} className="w-full py-3 bg-white text-black text-[10px] font-black uppercase hover:brightness-75 transition-all">
                   {isEditingBio ? "COMMIT_CHANGES" : "MODIFY_DOSSIER"}
@@ -368,7 +348,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* SYSTEM TOAST */}
       {toast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm bg-black border p-3 shadow-2xl animate-in slide-in-from-top-full duration-300" style={{ borderColor: themeColor }}>
           <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-50">Signal_Intercepted</p>
@@ -377,7 +356,6 @@ export default function Home() {
       )}
 
       {!isLoggedIn ? (
-        /* --- LOGIN MODULE --- */
         <div className="w-full max-w-sm border bg-black p-8 mx-4 rounded-sm shadow-2xl" style={{ borderColor: themeColor } as CSSProperties}>
           <div className="text-center mb-8 uppercase tracking-widest">
             <h1 className="text-3xl font-black italic tracking-tighter">Protocol_019</h1>
@@ -385,20 +363,30 @@ export default function Home() {
           </div>
           <div className="space-y-4">
             <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" style={{ borderColor: themeColor } as CSSProperties} placeholder="OPERATOR_ID" value={username} onChange={(e) => setUsername(e.target.value)} />
+            
+            {/* NEW REGISTRATION FIELDS */}
+            {isRegistering && (
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURE_EMAIL" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" style={{ borderColor: themeColor } as CSSProperties} placeholder="AVATAR_URL" value={avatar} onChange={(e) => setAvatar(e.target.value)} />
+                <input className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" style={{ borderColor: themeColor } as CSSProperties} placeholder="INITIAL_BIO" value={bio} onChange={(e) => setBio(e.target.value)} />
+              </div>
+            )}
+
             <input type="password" 
                    className="w-full bg-transparent border-b p-3 outline-none text-base focus:brightness-150 transition-all placeholder-zinc-800" 
                    style={{ borderColor: themeColor } as CSSProperties} placeholder="SECURITY_KEY" 
                    value={password} onChange={(e) => setPassword(e.target.value)} />
-            <button onClick={handleAuth} className="w-full text-black font-black py-4 uppercase text-sm mt-4 hover:brightness-110 active:scale-95 transition-all" style={{ backgroundColor: themeColor } as CSSProperties}>Establish_Link</button>
+            <button onClick={handleAuth} className="w-full text-black font-black py-4 uppercase text-sm mt-4 hover:brightness-110 active:scale-95 transition-all shadow-lg" style={{ backgroundColor: themeColor } as CSSProperties}>
+                {isRegistering ? "Register_Identity" : "Establish_Link"}
+            </button>
             <button onClick={() => setIsRegistering(!isRegistering)} className="w-full text-[10px] text-zinc-600 hover:text-white uppercase tracking-widest mt-4">
-                {isRegistering ? "Back to Login" : "Request Entry"}
+                {isRegistering ? "Return to Login" : "Request Entry"}
             </button>
           </div>
         </div>
       ) : (
-        /* --- MAIN INTERFACE --- */
         <div className="w-full h-full md:h-[92vh] md:max-w-6xl grid grid-cols-1 md:grid-cols-[260px_1fr] md:border border-zinc-900 bg-black md:rounded-sm overflow-hidden">
-          
           {/* SIDEBAR DRAWER */}
           <div className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-50 w-[85%] md:w-full h-full border-r border-zinc-900 bg-[#080808] p-6 flex flex-col justify-between transition-transform duration-300 ease-in-out`}>
             <div className="overflow-y-auto scrollbar-hide">
@@ -439,7 +427,7 @@ export default function Home() {
                   {activeDMs.map((dmUser) => {
                     const dmRoomId = [username, dmUser].sort().join("_DM_");
                     return (
-                      <button key={dmUser} onClick={() => { setShowShop(false); setCurrentRoom(dmRoomId); setIsSidebarOpen(false); }} className={`w-full text-left text-[11px] p-3 transition-all uppercase font-bold flex justify-between items-center ${currentRoom === dmRoomId && !showShop ? 'bg-white/5 border-l-2' : 'opacity-40'}`} style={{ borderColor: currentRoom === dmRoomId && !showShop ? themeColor : 'transparent' }}>
+                      <button key={dmUser} onClick={() => { setShowShop(false); setCurrentRoom(dmRoomId); setIsSidebarOpen(false); }} className={`w-full text-left text-[11px] p-3 transition-all uppercase font-bold flex justify-between items-center ${currentRoom === dmRoomId && !showShop ? 'bg-white/5 border-l-2' : 'opacity-40 hover:opacity-100'}`} style={{ borderColor: currentRoom === dmRoomId && !showShop ? themeColor : 'transparent' }}>
                         <span className="truncate pr-2">@ {dmUser}</span>
                         {notifications[dmRoomId] > 0 && <span className="bg-red-600 text-white text-[10px] px-2 rounded-full animate-pulse">{notifications[dmRoomId]}</span>}
                       </button>

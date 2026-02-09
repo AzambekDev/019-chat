@@ -18,52 +18,54 @@ app.use(cors({
     methods: ["GET", "POST"]
 }));
 
-// --- PROFILE & IDENTITY ROUTES (NEW) ---
+// --- IDENTITY & PROFILE ROUTES ---
 
-// Fetch public dossier for any operator
-app.get('/api/users/profile/:username', async (req, res) => {
-    try {
-        const user = await User.findOne({ username: req.params.username })
-                               .select('username bio status lastSeen activeTheme role');
-        if (!user) return res.status(404).json({ error: "IDENTITY_NOT_FOUND" });
-        res.json(user);
-    } catch (err) {
-        res.status(500).json({ error: "INTERNAL_CORE_ERROR" });
-    }
-});
-
-// Update operator bio
-app.post('/api/users/update-profile', async (req, res) => {
-    try {
-        const { username, bio } = req.body;
-        // Basic validation
-        if (bio.length > 200) return res.status(400).json({ error: "BIO_OVER_LIMIT" });
-
-        await User.findOneAndUpdate({ username }, { bio });
-        res.json({ success: true, message: "IDENTITY_COMMITTED" });
-    } catch (err) {
-        res.status(500).json({ error: "UPDATE_FAILURE" });
-    }
-});
-
-// --- AUTH ROUTES ---
+// expanded Registration: Handles email, avatar, bio, and instant login
 app.post('/api/register', async (req, res) => {
     try {
-        const { username, password } = req.body;
+        const { username, password, email, avatar, bio } = req.body;
+
+        // 1. Validation Check
+        const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+        if (existingUser) {
+            return res.status(400).json({ error: "IDENTITY_CONFLICT: Username or Email already active." });
+        }
+
         const hashedPassword = await bcrypt.hash(password, 10);
+        
+        // 2. Create User with Dossier Fields
         const newUser = new User({ 
             username, 
+            email, 
             password: hashedPassword, 
             role: 'user', 
-            coins: 0,
+            coins: 5.0, // Initial bonus for new operators
             unlockedThemes: ['default'],
             activeTheme: 'default',
-            bio: "SYSTEM_OPERATOR" // Default bio
+            bio: bio || "SYSTEM_OPERATOR",
+            avatar: avatar || "", // URL to image
+            status: "ONLINE"
         });
+
         await newUser.save();
-        res.status(201).json({ message: "User Created" });
+
+        // 3. Auto-Login Handshake (Generate Token)
+        const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET || 'secret123', { expiresIn: '7d' });
+
+        res.status(201).json({ 
+            message: "IDENTITY_ESTABLISHED",
+            token,
+            username: newUser.username,
+            role: newUser.role,
+            coins: newUser.coins,
+            activeTheme: newUser.activeTheme,
+            unlockedThemes: newUser.unlockedThemes,
+            bio: newUser.bio,
+            avatar: newUser.avatar
+        });
     } catch (err) {
-        res.status(500).json({ error: "Registration failed" });
+        console.error("REG_ERR:", err);
+        res.status(500).json({ error: "REGISTRATION_FAILURE" });
     }
 });
 
@@ -85,12 +87,29 @@ app.post('/api/login', async (req, res) => {
             coins: user.coins || 0,
             activeTheme: user.activeTheme || 'default',
             unlockedThemes: user.unlockedThemes || ['default'],
-            bio: user.bio // Ensure bio is sent on login
+            bio: user.bio,
+            avatar: user.avatar
         });
     } catch (err) {
-        console.error("LOGIN_ERR:", err);
         res.status(500).json({ error: "Login error" });
     }
+});
+
+app.get('/api/users/profile/:username', async (req, res) => {
+    try {
+        const user = await User.findOne({ username: req.params.username })
+                               .select('username bio status lastSeen activeTheme avatar');
+        if (!user) return res.status(404).json({ error: "NOT_FOUND" });
+        res.json(user);
+    } catch (err) { res.status(500).json({ error: "CORE_ERR" }); }
+});
+
+app.post('/api/users/update-profile', async (req, res) => {
+    try {
+        const { username, bio, avatar } = req.body;
+        await User.findOneAndUpdate({ username }, { bio, avatar });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: "UPDATE_ERR" }); }
 });
 
 app.get('/api/users/search', async (req, res) => {
@@ -101,7 +120,7 @@ app.get('/api/users/search', async (req, res) => {
             username: { $regex: `^${query}`, $options: 'i' } 
         })
         .limit(5)
-        .select('username role status'); // Added status to search
+        .select('username role status avatar');
         res.json(users);
     } catch (err) {
         res.status(500).json({ error: "Search failed" });
@@ -122,11 +141,8 @@ mongoose.connect(process.env.MONGO_URI)
 
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
-    let connectedUser = null; // Track who is on this socket
+    let connectedUser = null;
 
-    console.log(`LINK_ESTABLISHED: ${socket.id}`);
-
-    // --- 1. JOIN ROOM & STATUS LOGIC ---
     socket.on('join_room', async (data) => {
         const room = typeof data === 'string' ? data : data.room;
         const userHandle = typeof data === 'object' ? data.username : null;
@@ -134,48 +150,29 @@ io.on('connection', (socket) => {
         if (userHandle) {
             connectedUser = userHandle;
             socket.join(userHandle);
-            
-            // Mark operator as ONLINE
             await User.findOneAndUpdate({ username: userHandle }, { status: "ONLINE" });
             io.emit('user_status_change', { username: userHandle, status: "ONLINE" });
         }
 
-        // Leave previous rooms but protect alert room
         socket.rooms.forEach(r => {
-            if (r !== socket.id && r !== userHandle && r !== room) {
-                socket.leave(r);
-            }
+            if (r !== socket.id && r !== userHandle && r !== room) socket.leave(r);
         });
 
         socket.join(room);
-        console.log(`OPERATOR_${userHandle || 'anonymous'} linked to channel: ${room}`);
-
-        const messages = await Message.find({ room: room || 'global' })
-            .sort({ timestamp: 1 })
-            .limit(50);
-        
+        const messages = await Message.find({ room: room || 'global' }).sort({ timestamp: 1 }).limit(50);
         socket.emit('load_messages', messages);
     });
 
-    // --- 2. STATUS TRACKING (DISCONNECT) ---
     socket.on('disconnect', async () => {
         if (connectedUser) {
-            // Update DB status to OFFLINE
-            await User.findOneAndUpdate(
-                { username: connectedUser }, 
-                { status: "OFFLINE", lastSeen: new Date() }
-            );
-            // Alert everyone the operator dropped off
+            await User.findOneAndUpdate({ username: connectedUser }, { status: "OFFLINE", lastSeen: new Date() });
             io.emit('user_status_change', { username: connectedUser, status: "OFFLINE" });
-            console.log(`SIGNAL_LOST: ${connectedUser}`);
         }
     });
 
-    // --- 3. MESSAGE & NOTIFICATION LOGIC ---
     socket.on('send_message', async (data) => {
         try {
             const targetRoom = data.room || 'global';
-
             const newMessage = new Message({ 
                 sender: data.user, 
                 text: data.text || "", 
@@ -184,50 +181,34 @@ io.on('connection', (socket) => {
                 isEncrypted: data.isEncrypted || false
             });
             const savedMessage = await newMessage.save();
-
             io.to(targetRoom).emit('receive_message', savedMessage); 
 
             if (targetRoom.includes("_DM_")) {
                 const parts = targetRoom.split("_DM_");
                 const recipient = parts.find(p => p !== data.user);
-                
                 io.to(recipient).emit('incoming_dm_alert', {
                     from: data.user,
                     room: targetRoom,
-                    text: data.isEncrypted ? "ENCRYPTED_SIGNAL_RECEIVED" : (data.text || "Sent a GIF")
+                    text: data.isEncrypted ? "SECURED_SIGNAL" : (data.text || "Attached Media")
                 });
             }
 
-            const updatedUser = await User.findOneAndUpdate(
-                { username: data.user },
-                { $inc: { coins: 0.01 } },
-                { new: true }
-            );
-
-            if (updatedUser) {
-                socket.emit('coin_update', updatedUser.coins);
-            }
-        } catch (err) {
-            console.error("SEND_ERROR:", err);
-        }
+            const updatedUser = await User.findOneAndUpdate({ username: data.user }, { $inc: { coins: 0.01 } }, { new: true });
+            if (updatedUser) socket.emit('coin_update', updatedUser.coins);
+        } catch (err) { console.error("SEND_ERROR:", err); }
     });
 
-    // --- 4. DELETE/PURGE/ADMIN ---
+    // ... (Delete and Purge logic remain the same)
     socket.on('delete_message', async (data) => {
         try {
             const { messageId, username } = data;
             const msg = await Message.findById(messageId);
             const user = await User.findOne({ username });
-            if (!msg || !user) return;
-
-            if (msg.sender === username || user.role === 'admin' || username === 'iloveshirin') {
-                const targetRoom = msg.room;
+            if (msg && user && (msg.sender === username || user.role === 'admin' || username === 'iloveshirin')) {
                 await Message.findByIdAndDelete(messageId);
-                io.to(targetRoom).emit('message_deleted', messageId);
+                io.to(msg.room).emit('message_deleted', messageId);
             }
-        } catch (err) {
-            console.error("DELETE_ERROR:", err);
-        }
+        } catch (err) { console.error(err); }
     });
 
     socket.on('clear_all_messages', async (username) => {
@@ -237,9 +218,7 @@ io.on('connection', (socket) => {
                 await Message.deleteMany({});
                 io.emit('chat_cleared');
             }
-        } catch (err) {
-            console.error("PURGE_ERROR:", err);
-        }
+        } catch (err) { console.error(err); }
     });
 
     socket.on('purchase_theme', async ({ username, themeId, cost }) => {
@@ -253,9 +232,7 @@ io.on('connection', (socket) => {
                 socket.emit('coin_update', user.coins);
                 socket.emit('theme_unlocked', { unlocked: user.unlockedThemes, active: user.activeTheme });
             }
-        } catch (err) {
-            console.error("PURCHASE_ERR:", err);
-        }
+        } catch (err) { console.error(err); }
     });
 
     socket.on('admin_grant_coins', async ({ username }) => {
@@ -264,9 +241,7 @@ io.on('connection', (socket) => {
                 const updatedUser = await User.findOneAndUpdate({ username }, { $inc: { coins: 100 } }, { new: true });
                 if (updatedUser) socket.emit('coin_update', updatedUser.coins);
             }
-        } catch (err) {
-            console.error("GRANT_ERROR:", err);
-        }
+        } catch (err) { console.error(err); }
     });
 });
 
