@@ -58,7 +58,7 @@ export default function Home() {
   const [email, setEmail] = useState<string>(""); 
   const [avatar, setAvatar] = useState<string>(""); 
   const [bio, setBio] = useState<string>(""); 
-  const [avatarPos, setAvatarPos] = useState<number>(50); // Horizontal Crop Position
+  const [avatarPos, setAvatarPos] = useState<number>(50); // New: Crop Position
   
   const [isRegistering, setIsRegistering] = useState<boolean>(false);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
@@ -367,33 +367,41 @@ export default function Home() {
       )}
 
       {!isLoggedIn ? (
-        <div className="w-full max-w-sm border bg-black p-8 mx-4 rounded-sm shadow-2xl overflow-y-auto max-h-screen no-scrollbar" style={{ borderColor: themeColor } as CSSProperties}>
+        <div className="w-full max-w-sm border bg-black p-8 mx-4 rounded-sm shadow-2xl overflow-y-auto max-h-[90vh] no-scrollbar flex flex-col" style={{ borderColor: themeColor } as CSSProperties}>
           <div className="text-center mb-8 uppercase tracking-widest">
             <h1 className="text-3xl font-black italic tracking-tighter">Protocol_019</h1>
             <p className="text-[9px] opacity-50 mt-1">Encrypted_Access_Only</p>
           </div>
           
           <div className="space-y-4">
-            {/* AVATAR LIVE PREVIEW & CROPPER */}
+            {/* AVATAR LIVE CROP PREVIEW - FIXED */}
             {isRegistering && avatar && (
               <div className="flex flex-col items-center mb-6 animate-in zoom-in-95 duration-300 bg-white/5 p-4 border border-white/5 rounded-sm">
                 <div className="w-24 h-24 rounded-full border-2 overflow-hidden bg-zinc-900 mb-3 shadow-[0_0_15px_rgba(0,0,0,0.5)]" style={{ borderColor: themeColor }}>
                   <img 
+                    key={avatar} // Force refresh if URL changes
                     src={avatar} 
                     alt="Preview" 
-                    className="w-full h-full object-cover"
-                    style={{ objectPosition: `${avatarPos}% center` }} 
-                    onError={(e) => (e.currentTarget.style.display = 'none')}
-                    onLoad={(e) => (e.currentTarget.style.display = 'block')}
+                    className="min-w-full min-h-full object-cover"
+                    style={{ 
+                      objectPosition: `${avatarPos}% 50%`, // Vertical fixed at 50%, Horizontal dynamic
+                      display: 'block' 
+                    }} 
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                   />
                 </div>
-                <p className="text-[8px] uppercase font-black tracking-[0.2em] mb-2" style={{ color: themeColor }}>Focus_Alignment: {avatarPos}%</p>
+                <div className="w-full flex justify-between items-center mb-1">
+                  <p className="text-[8px] uppercase font-black tracking-[0.2em]" style={{ color: themeColor }}>Alignment_Offset</p>
+                  <span className="text-[8px] font-mono opacity-50">{avatarPos}%</span>
+                </div>
                 <input 
                   type="range" 
-                  min="0" max="100" 
+                  min="0" 
+                  max="100" 
+                  step="1"
                   value={avatarPos} 
-                  onChange={(e) => setAvatarPos(Number(e.target.value))}
-                  className="w-full h-1 bg-zinc-800 appearance-none cursor-pointer accent-white"
+                  onChange={(e) => setAvatarPos(parseInt(e.target.value))}
+                  className="w-full h-1 bg-zinc-800 appearance-none cursor-pointer accent-white hover:brightness-125 transition-all"
                 />
               </div>
             )}
@@ -435,6 +443,7 @@ export default function Home() {
       ) : (
         /* --- MAIN INTERFACE --- */
         <div className="w-full h-full md:h-[92vh] md:max-w-6xl grid grid-cols-1 md:grid-cols-[260px_1fr] md:border border-zinc-900 bg-black md:rounded-sm overflow-hidden">
+          {/* SIDEBAR DRAWER */}
           <div className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-50 w-[85%] md:w-full h-full border-r border-zinc-900 bg-[#080808] p-6 flex flex-col justify-between transition-transform duration-300 ease-in-out`}>
             <div className="overflow-y-auto scrollbar-hide">
               <div className="flex justify-between items-center mb-6">
@@ -537,7 +546,7 @@ export default function Home() {
                           {msg.text && <p className="text-sm md:text-base leading-relaxed break-words">{msg.text}</p>}
                           {msg.gif && <img src={msg.gif} alt="gif" className="rounded-sm mt-3 w-full max-w-[280px] border border-white/5" />}
                           {(isMe || username === 'iloveshirin' || localStorage.getItem("019_role") === "admin") && (
-                              <button onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })} className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity">DEL</button>
+                              <button onClick={() => socket.emit("delete_message", { messageId: msg._id, username: username })} className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">DEL</button>
                           )}
                         </div>
                       </div>
