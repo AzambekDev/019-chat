@@ -18,6 +18,35 @@ app.use(cors({
     methods: ["GET", "POST"]
 }));
 
+// --- PROFILE ROUTES ---
+
+// Get public profile data
+app.get('/api/users/profile/:username', async (req, res) => {
+    try {
+        const user = await User.findOne({ username: req.params.username })
+                               .select('username bio avatar status lastSeen activeTheme');
+        if (!user) return res.status(404).json({ error: "User not found" });
+        res.json(user);
+    } catch (err) {
+        res.status(500).json({ error: "Profile fetch failed" });
+    }
+});
+
+// Update own profile
+app.post('/api/users/update-profile', async (req, res) => {
+    try {
+        const { username, bio, avatar } = req.body;
+        const updatedUser = await User.findOneAndUpdate(
+            { username },
+            { bio, avatar },
+            { new: true }
+        ).select('username bio avatar');
+        res.json(updatedUser);
+    } catch (err) {
+        res.status(500).json({ error: "Update failed" });
+    }
+});
+
 // --- AUTH ROUTES ---
 app.post('/api/register', async (req, res) => {
     try {
@@ -55,7 +84,9 @@ app.post('/api/login', async (req, res) => {
             role: user.role,
             coins: user.coins || 0,
             activeTheme: user.activeTheme || 'default',
-            unlockedThemes: user.unlockedThemes || ['default']
+            unlockedThemes: user.unlockedThemes || ['default'],
+            bio: user.bio,
+            avatar: user.avatar
         });
     } catch (err) {
         console.error("LOGIN_ERR:", err);
@@ -71,7 +102,7 @@ app.get('/api/users/search', async (req, res) => {
             username: { $regex: `^${query}`, $options: 'i' } 
         })
         .limit(5)
-        .select('username role');
+        .select('username role avatar status');
         res.json(users);
     } catch (err) {
         res.status(500).json({ error: "Search failed" });
@@ -92,40 +123,47 @@ mongoose.connect(process.env.MONGO_URI)
 
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
-    console.log(`LINK_ESTABLISHED: ${socket.id}`);
+    let currentConnectedUser = null;
 
-    // --- 1. JOIN ROOM LOGIC ---
+    // --- 1. JOIN ROOM & STATUS LOGIC ---
     socket.on('join_room', async (data) => {
         const room = typeof data === 'string' ? data : data.room;
         const userHandle = typeof data === 'object' ? data.username : null;
 
-        // Leave previous chat rooms, but NOT the personal username room
+        if (userHandle) {
+            currentConnectedUser = userHandle;
+            socket.join(userHandle);
+            // Mark user as ONLINE
+            await User.findOneAndUpdate({ username: userHandle }, { status: "ONLINE" });
+            io.emit('user_status_change', { username: userHandle, status: "ONLINE" });
+        }
+
         socket.rooms.forEach(r => {
-            if (r !== socket.id && r !== userHandle) socket.leave(r);
+            if (r !== socket.id && r !== userHandle && r !== room) {
+                socket.leave(r);
+            }
         });
 
         socket.join(room);
-        
-        // If username is provided, ensure they are always in their personal alert room
-        if (userHandle) {
-            socket.join(userHandle);
-            console.log(`OPERATOR_${userHandle} listening for alerts.`);
-        }
-
-        console.log(`LINK_STABLE: Room ${room}`);
-
-        const messages = await Message.find({ room: room || 'global' })
-            .sort({ timestamp: 1 })
-            .limit(50);
-        
+        const messages = await Message.find({ room: room || 'global' }).sort({ timestamp: 1 }).limit(50);
         socket.emit('load_messages', messages);
     });
 
-    // --- 2. MESSAGE & NOTIFICATION LOGIC ---
+    // --- 2. DISCONNECT LOGIC (Status Update) ---
+    socket.on('disconnect', async () => {
+        if (currentConnectedUser) {
+            await User.findOneAndUpdate(
+                { username: currentConnectedUser }, 
+                { status: "OFFLINE", lastSeen: new Date() }
+            );
+            io.emit('user_status_change', { username: currentConnectedUser, status: "OFFLINE" });
+        }
+    });
+
+    // --- 3. MESSAGE & NOTIFICATION LOGIC ---
     socket.on('send_message', async (data) => {
         try {
             const targetRoom = data.room || 'global';
-
             const newMessage = new Message({ 
                 sender: data.user, 
                 text: data.text || "", 
@@ -135,19 +173,15 @@ io.on('connection', (socket) => {
             });
             const savedMessage = await newMessage.save();
 
-            // Broadcast to everyone in the specific room
             io.to(targetRoom).emit('receive_message', savedMessage); 
 
-            // Handle DM alerts (triggers sidebar update and beep for recipient)
             if (targetRoom.includes("_DM_")) {
                 const parts = targetRoom.split("_DM_");
                 const recipient = parts.find(p => p !== data.user);
-                
-                // IMPORTANT: Emit to the recipient's personal room handle
                 io.to(recipient).emit('incoming_dm_alert', {
                     from: data.user,
                     room: targetRoom,
-                    text: data.isEncrypted ? "ENCRYPTED_SIGNAL" : (data.text || "Sent a GIF")
+                    text: data.isEncrypted ? "ENCRYPTED_SIGNAL_RECEIVED" : (data.text || "Sent a GIF")
                 });
             }
 
@@ -165,22 +199,17 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- 3. DELETE/PURGE/ADMIN ---
+    // --- 4. THEME/ADMIN/DELETE (Unchanged) ---
     socket.on('delete_message', async (data) => {
         try {
             const { messageId, username } = data;
             const msg = await Message.findById(messageId);
             const user = await User.findOne({ username });
-            if (!msg || !user) return;
-
-            if (msg.sender === username || user.role === 'admin' || username === 'iloveshirin') {
-                const targetRoom = msg.room;
+            if (msg && user && (msg.sender === username || user.role === 'admin' || username === 'iloveshirin')) {
                 await Message.findByIdAndDelete(messageId);
-                io.to(targetRoom).emit('message_deleted', messageId);
+                io.to(msg.room).emit('message_deleted', messageId);
             }
-        } catch (err) {
-            console.error("DELETE_ERROR:", err);
-        }
+        } catch (err) { console.error(err); }
     });
 
     socket.on('clear_all_messages', async (username) => {
@@ -190,9 +219,7 @@ io.on('connection', (socket) => {
                 await Message.deleteMany({});
                 io.emit('chat_cleared');
             }
-        } catch (err) {
-            console.error("PURGE_ERROR:", err);
-        }
+        } catch (err) { console.error(err); }
     });
 
     socket.on('purchase_theme', async ({ username, themeId, cost }) => {
@@ -206,9 +233,7 @@ io.on('connection', (socket) => {
                 socket.emit('coin_update', user.coins);
                 socket.emit('theme_unlocked', { unlocked: user.unlockedThemes, active: user.activeTheme });
             }
-        } catch (err) {
-            console.error("PURCHASE_ERR:", err);
-        }
+        } catch (err) { console.error(err); }
     });
 
     socket.on('admin_grant_coins', async ({ username }) => {
@@ -217,9 +242,7 @@ io.on('connection', (socket) => {
                 const updatedUser = await User.findOneAndUpdate({ username }, { $inc: { coins: 100 } }, { new: true });
                 if (updatedUser) socket.emit('coin_update', updatedUser.coins);
             }
-        } catch (err) {
-            console.error("GRANT_ERROR:", err);
-        }
+        } catch (err) { console.error(err); }
     });
 });
 
