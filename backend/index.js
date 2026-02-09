@@ -20,85 +20,40 @@ app.use(cors({
 
 // --- IDENTITY & PROFILE ROUTES ---
 
-// expanded Registration: Handles email, avatar, bio, and instant login
 app.post('/api/register', async (req, res) => {
     try {
         const { username, password, email, avatar, bio } = req.body;
-
-        // 1. Validation Check
         const existingUser = await User.findOne({ $or: [{ username }, { email }] });
-        if (existingUser) {
-            return res.status(400).json({ error: "IDENTITY_CONFLICT: Username or Email already active." });
-        }
+        if (existingUser) return res.status(400).json({ error: "IDENTITY_CONFLICT" });
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        
-        // 2. Create User with Dossier Fields
         const newUser = new User({ 
-            username, 
-            email, 
-            password: hashedPassword, 
-            role: 'user', 
-            coins: 5.0, // Initial bonus for new operators
-            unlockedThemes: ['default'],
-            activeTheme: 'default',
-            bio: bio || "SYSTEM_OPERATOR",
-            avatar: avatar || "", // URL to image
-            status: "ONLINE"
+            username, email, password: hashedPassword, role: 'user', 
+            coins: 5.0, unlockedThemes: ['default'], activeTheme: 'default',
+            bio: bio || "SYSTEM_OPERATOR", avatar: avatar || "", status: "ONLINE"
         });
-
         await newUser.save();
 
-        // 3. Auto-Login Handshake (Generate Token)
         const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET || 'secret123', { expiresIn: '7d' });
-
-        res.status(201).json({ 
-            message: "IDENTITY_ESTABLISHED",
-            token,
-            username: newUser.username,
-            role: newUser.role,
-            coins: newUser.coins,
-            activeTheme: newUser.activeTheme,
-            unlockedThemes: newUser.unlockedThemes,
-            bio: newUser.bio,
-            avatar: newUser.avatar
-        });
-    } catch (err) {
-        console.error("REG_ERR:", err);
-        res.status(500).json({ error: "REGISTRATION_FAILURE" });
-    }
+        res.status(201).json({ token, username: newUser.username, role: newUser.role, coins: newUser.coins });
+    } catch (err) { res.status(500).json({ error: "REGISTRATION_FAILURE" }); }
 });
 
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
         const user = await User.findOne({ username });
-        if (!user) return res.status(400).json({ error: "User not found" });
-
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(400).json({ error: "Invalid credentials" });
+        if (!user || !(await bcrypt.compare(password, user.password))) 
+            return res.status(400).json({ error: "Invalid credentials" });
 
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'secret123', { expiresIn: '7d' });
-        
-        res.json({ 
-            token, 
-            username: user.username,
-            role: user.role,
-            coins: user.coins || 0,
-            activeTheme: user.activeTheme || 'default',
-            unlockedThemes: user.unlockedThemes || ['default'],
-            bio: user.bio,
-            avatar: user.avatar
-        });
-    } catch (err) {
-        res.status(500).json({ error: "Login error" });
-    }
+        res.json({ token, username: user.username, role: user.role, coins: user.coins, bio: user.bio, avatar: user.avatar });
+    } catch (err) { res.status(500).json({ error: "Login error" }); }
 });
 
 app.get('/api/users/profile/:username', async (req, res) => {
     try {
-        const user = await User.findOne({ username: req.params.username })
-                               .select('username bio status lastSeen activeTheme avatar');
+        const user = await User.findOne({ username: req.params.username }).select('username bio status lastSeen activeTheme avatar');
         if (!user) return res.status(404).json({ error: "NOT_FOUND" });
         res.json(user);
     } catch (err) { res.status(500).json({ error: "CORE_ERR" }); }
@@ -116,23 +71,14 @@ app.get('/api/users/search', async (req, res) => {
     try {
         const { query } = req.query;
         if (!query) return res.json([]);
-        const users = await User.find({ 
-            username: { $regex: `^${query}`, $options: 'i' } 
-        })
-        .limit(5)
-        .select('username role status avatar');
+        const users = await User.find({ username: { $regex: `^${query}`, $options: 'i' } }).limit(5).select('username role status avatar');
         res.json(users);
-    } catch (err) {
-        res.status(500).json({ error: "Search failed" });
-    }
+    } catch (err) { res.status(500).json({ error: "Search failed" }); }
 });
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: "https://019-chat.vercel.app",
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: "https://019-chat.vercel.app", methods: ["GET", "POST"] }
 });
 
 mongoose.connect(process.env.MONGO_URI)
@@ -163,11 +109,17 @@ io.on('connection', (socket) => {
         socket.emit('load_messages', messages);
     });
 
-    socket.on('disconnect', async () => {
-        if (connectedUser) {
-            await User.findOneAndUpdate({ username: connectedUser }, { status: "OFFLINE", lastSeen: new Date() });
-            io.emit('user_status_change', { username: connectedUser, status: "OFFLINE" });
-        }
+    // --- FEATURE #2: READ RECEIPTS LOGIC ---
+    socket.on('mark_as_read', async ({ room, username }) => {
+        try {
+            // Update all messages in room to include this user in seenBy array
+            await Message.updateMany(
+                { room, seenBy: { $ne: username } },
+                { $push: { seenBy: username } }
+            );
+            // Notify others in the room
+            io.to(room).emit('messages_read_update', { room, seenBy: [username] });
+        } catch (err) { console.error("READ_RECEIPT_ERR:", err); }
     });
 
     socket.on('send_message', async (data) => {
@@ -178,10 +130,20 @@ io.on('connection', (socket) => {
                 text: data.text || "", 
                 gif: data.gif || "",
                 room: targetRoom,
-                isEncrypted: data.isEncrypted || false
+                isEncrypted: data.isEncrypted || false,
+                isVanishing: data.isVanishing || false,
+                seenBy: [data.user] // Sender has seen it
             });
             const savedMessage = await newMessage.save();
             io.to(targetRoom).emit('receive_message', savedMessage); 
+
+            // --- FEATURE #5: VANISHING TIMER ---
+            if (data.isVanishing) {
+                setTimeout(async () => {
+                    await Message.findByIdAndDelete(savedMessage._id);
+                    io.to(targetRoom).emit('vanishing_pulse', savedMessage._id);
+                }, 30000); // 30 second self-destruct
+            }
 
             if (targetRoom.includes("_DM_")) {
                 const parts = targetRoom.split("_DM_");
@@ -193,12 +155,18 @@ io.on('connection', (socket) => {
                 });
             }
 
-            const updatedUser = await User.findOneAndUpdate({ username: data.user }, { $inc: { coins: 0.01 } }, { new: true });
-            if (updatedUser) socket.emit('coin_update', updatedUser.coins);
+            await User.findOneAndUpdate({ username: data.user }, { $inc: { coins: 0.01 } });
+            socket.emit('coin_update', (await User.findOne({username: data.user})).coins);
         } catch (err) { console.error("SEND_ERROR:", err); }
     });
 
-    // ... (Delete and Purge logic remain the same)
+    socket.on('disconnect', async () => {
+        if (connectedUser) {
+            await User.findOneAndUpdate({ username: connectedUser }, { status: "OFFLINE", lastSeen: new Date() });
+            io.emit('user_status_change', { username: connectedUser, status: "OFFLINE" });
+        }
+    });
+
     socket.on('delete_message', async (data) => {
         try {
             const { messageId, username } = data;
@@ -207,16 +175,6 @@ io.on('connection', (socket) => {
             if (msg && user && (msg.sender === username || user.role === 'admin' || username === 'iloveshirin')) {
                 await Message.findByIdAndDelete(messageId);
                 io.to(msg.room).emit('message_deleted', messageId);
-            }
-        } catch (err) { console.error(err); }
-    });
-
-    socket.on('clear_all_messages', async (username) => {
-        try {
-            const user = await User.findOne({ username });
-            if (user && (user.role === 'admin' || username === 'iloveshirin')) {
-                await Message.deleteMany({});
-                io.emit('chat_cleared');
             }
         } catch (err) { console.error(err); }
     });
@@ -231,15 +189,6 @@ io.on('connection', (socket) => {
                 await user.save();
                 socket.emit('coin_update', user.coins);
                 socket.emit('theme_unlocked', { unlocked: user.unlockedThemes, active: user.activeTheme });
-            }
-        } catch (err) { console.error(err); }
-    });
-
-    socket.on('admin_grant_coins', async ({ username }) => {
-        try {
-            if (username === 'iloveshirin') {
-                const updatedUser = await User.findOneAndUpdate({ username }, { $inc: { coins: 100 } }, { new: true });
-                if (updatedUser) socket.emit('coin_update', updatedUser.coins);
             }
         } catch (err) { console.error(err); }
     });
