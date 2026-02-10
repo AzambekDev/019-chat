@@ -46,11 +46,3 @@
 * **MongoDB & Mongoose** (Persistence layer)
 * **JWT & Bcrypt** (Auth security)
 
----
-
-## 🚀 Installation & Deployment
-
-### 1. Clone the Repository
-```bash
-git clone [https://github.com/your-username/protocol-019.git](https://github.com/your-username/protocol-019.git)
-cd protocol-019
